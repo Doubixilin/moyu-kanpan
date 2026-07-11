@@ -132,3 +132,35 @@
 ## 7. 测试覆盖的实际边界
 
 91.23% 是修复前审计时领域、服务和 provider 文件的覆盖率，不包含 `electron/main.ts`、`renderer.ts` 和 `settingsRenderer.ts` 的完整真实运行覆盖。最终版本增加了安全边界、原子写入、损坏恢复、来源状态、AI namespace、profile 一致性和提醒 rebase 等测试，总计 135 项；窗口置顶、草稿保护、滚动保持与 macOS 平台行为仍应保留人工 GUI 验收。
+
+## 8. macOS Apple Silicon 适配与实机验证（2026-07-11）
+
+验证环境：Apple M4（arm64）、macOS 26.2、Node 22.23.1、npm 10.9.8、Electron 39.8.10、electron-builder 26.15.3。开发分支为 `codex/macos-port`。
+
+已完成适配：
+
+- “仅托盘驻留”在 macOS 同步调用 `app.dock.hide()` / `app.dock.show()`，并同步 Mission Control 可见性；主窗口、设置窗口、托盘和老板键路径均复用同一 Dock 状态同步函数。
+- macOS 置顶层级使用 `floating`，Windows 继续使用既有 `screen-saver`；主窗口继续禁止最大化和全屏，恢复显示前会修复瞬态状态与出屏位置。
+- 设置窗口按当前指针所在显示器的 work area 居中；设置窗口隐藏或关闭时恢复主窗口配置的置顶状态。
+- 菜单栏托盘优先使用系统 SF Symbol `chart.line.uptrend.xyaxis` 并标记为 Template Image，失败时回退到既有透明图标；Windows 托盘路径保持不变。
+- 默认老板键改为 `CommandOrControl+Shift+Space`，避开 macOS 默认占用的 `Command+Option+Space`；macOS 启动时仅迁移该旧默认值，不改写用户自定义组合键。
+- 退出流程在提醒状态落盘前显式刷新主窗口 bounds，避免退出前最后一次移动尚在防抖计时器中。
+- 未保存凭据时不再让 Keychain 可用性探测阻塞启动热路径；锁屏实测曾复现 ad-hoc 重签后 Keychain 查询等待，调整后同一锁屏会话可正常创建主窗口、渲染进程、SQLite 与缓存。打开设置或实际保存 Key 时仍会探测安全存储，失败时继续拒绝明文。
+- 新增按本机 `arm64` / `x64` 架构构建的 `package:mac`，保留 `package:win`；macOS 使用 ad-hoc 签名并输出 `.app` 与 DMG。
+
+自动与真实数据验证：
+
+| 检查 | macOS 结果 |
+| --- | --- |
+| `npm ci` | 通过 |
+| `npm test` | 137 项通过 |
+| `npm run build` | 通过 |
+| `npm run smoke:data` | 通过；东财/腾讯双源一致，覆盖率 100%，市场概览、241 点分时、120 根日 K 与 BOLL 正常 |
+| `npm run smoke:news` | 通过；东财、巨潮、上交所、深交所、证监会均成功，52 份文档聚合为 41 个事件，其中 6 个合并事件 |
+| `npm run smoke:profile` | 通过；公开模拟配置 4/4 行情齐全，默认配置持仓仍为空 |
+| `npm run smoke:safe-storage` | 通过；`safeStorage` 可用且加解密往返成功，系统通知 API 可用；测试未读取或打印任何真实 Key |
+| `npm run package:mac` | 通过；生成 arm64 `.app` 与 DMG，ASAR 必需内容和泄漏扫描通过 |
+| 签名与磁盘映像 | `codesign --verify --deep --strict` 通过；DMG CRC 校验、挂载和挂载内 `.app` 签名验证通过；未做 Developer ID 签名或公证 |
+| 独立启动 | 从仓库外空目录、隔离 userData 启动；主进程和 3 个子进程稳定，设置、SQLite 和缓存只写入隔离 userData，空工作目录保持为空 |
+
+GUI 验收说明：本轮执行到原生窗口验收时 macOS 会话处于锁屏，自动化无法读取窗口或操作菜单栏/Dock。因此透明度、拖动、置顶切换、老板键、点击穿透恢复、托盘退出、设置窗口视觉完整性、原文打开以及多显示器拖动恢复仍需在解锁后的桌面会话补做最终人工复核。代码和构建层验证不能替代这些原生交互结论。

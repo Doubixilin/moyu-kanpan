@@ -19,9 +19,11 @@
     "smoke:data": "npm run build && node scripts/smoke-data.mjs",
     "smoke:news": "npm run build && node scripts/smoke-news-events.mjs",
     "smoke:profile": "npm run build && node scripts/smoke-profile.mjs",
+    "smoke:safe-storage": "electron scripts/smoke-safe-storage.cjs",
     "start": "npm run build && electron .",
     "clean:release": "node scripts/clean-release.mjs",
-    "package:win": "npm run clean:release && npm run build && electron-builder --win --x64 --publish never && node scripts/verify-packaged-app.mjs"
+    "package:win": "npm run clean:release && npm run build && electron-builder --win --x64 --publish never && node scripts/verify-packaged-app.mjs",
+    "package:mac": "npm run clean:release && npm run build && node scripts/package-mac.mjs && node scripts/verify-packaged-app.mjs --platform mac"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
@@ -51,6 +53,11 @@
     },
     "win": {
       "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.utilities",
+      "identity": "-"
     }
   }
 }

@@ -1,7 +1,8 @@
-export const DEFAULT_BOSS_KEY_ACCELERATOR = "CommandOrControl+Alt+Space";
+export const DEFAULT_BOSS_KEY_ACCELERATOR = "CommandOrControl+Shift+Space";
 export const LEGACY_DEFAULT_BOSS_KEY_ACCELERATORS = [
   "CommandOrControl+Alt+S",
-  "CommandOrControl+Shift+F11"
+  "CommandOrControl+Shift+F11",
+  "CommandOrControl+Alt+Space"
 ] as const;
 
 const NAMED_KEYS: Record<string, string> = {

@@ -44,7 +44,7 @@ describe("config", () => {
       alwaysOnTop: true,
       trayOnly: true,
       bossKeyEnabled: true,
-      bossKeyAccelerator: "CommandOrControl+Alt+Space",
+      bossKeyAccelerator: "CommandOrControl+Shift+Space",
       clickThrough: false,
       locked: false
     });
@@ -197,8 +197,8 @@ describe("config", () => {
       window: { bossKeyAccelerator: "CommandOrControl+Alt+S" }
     });
 
-    assert.equal(firstLegacy.window.bossKeyAccelerator, "CommandOrControl+Alt+Space");
-    assert.equal(fullscreenLegacy.window.bossKeyAccelerator, "CommandOrControl+Alt+Space");
+    assert.equal(firstLegacy.window.bossKeyAccelerator, "CommandOrControl+Shift+Space");
+    assert.equal(fullscreenLegacy.window.bossKeyAccelerator, "CommandOrControl+Shift+Space");
     assert.deepEqual(
       {
         width: fullscreenLegacy.window.width,

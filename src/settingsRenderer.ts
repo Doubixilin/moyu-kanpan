@@ -1302,10 +1302,9 @@ function acceleratorFromKeyboardEvent(event: KeyboardEvent): string | null {
   if (!key) return null;
 
   const parts: string[] = [];
-  if (event.ctrlKey) parts.push("CommandOrControl");
+  if (event.ctrlKey || event.metaKey) parts.push("CommandOrControl");
   if (event.altKey) parts.push("Alt");
   if (event.shiftKey) parts.push("Shift");
-  if (event.metaKey) parts.push("Super");
   parts.push(key);
   return parseBossKeyAccelerator(parts.join("+"));
 }
@@ -1362,7 +1361,11 @@ function keyFromKeyboardEvent(event: KeyboardEvent): string {
   return keys[event.code] ?? "";
 }
 function displayBossKey(accelerator: string): string {
-  return accelerator.replace("CommandOrControl", "Ctrl").replace("Super", "Win");
+  const isMac = /Macintosh|Mac OS X/.test(navigator.userAgent);
+  return accelerator
+    .replace("CommandOrControl", isMac ? "Command" : "Ctrl")
+    .replace("Alt", isMac ? "Option" : "Alt")
+    .replace("Super", isMac ? "Command" : "Win");
 }
 
 function focusBossKeyRecorder(): void {

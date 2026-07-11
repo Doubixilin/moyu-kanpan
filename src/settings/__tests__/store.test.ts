@@ -96,12 +96,12 @@ describe("SettingsStore", () => {
       assert.equal(migrated.schemaVersion, 8);
       assert.equal(
         migrated.window.bossKeyAccelerator,
-        "CommandOrControl+Alt+Space"
+        "CommandOrControl+Shift+Space"
       );
       assert.equal(migrated.window.width, 380);
       assert.equal(migrated.window.height, 520);
       assert.match(persisted, /"schemaVersion": 8/);
-      assert.match(persisted, /"bossKeyAccelerator": "CommandOrControl\+Alt\+Space"/);
+      assert.match(persisted, /"bossKeyAccelerator": "CommandOrControl\+Shift\+Space"/);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

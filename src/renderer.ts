@@ -99,7 +99,7 @@ const defaultSettings: UserSettings = {
     alwaysOnTop: true,
     trayOnly: true,
     bossKeyEnabled: true,
-    bossKeyAccelerator: "CommandOrControl+Alt+Space",
+    bossKeyAccelerator: "CommandOrControl+Shift+Space",
     clickThrough: false,
     locked: false
   }

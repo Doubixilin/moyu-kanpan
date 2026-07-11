@@ -33,7 +33,7 @@ function current(): UserSettings {
       oncePerDay: false, onlyDuringTrading: true,
       notifications: { widget: true, tray: true, windows: false }, groups: []
     },
-    window: { width: 380, height: 680, x: null, y: null, alwaysOnTop: true, trayOnly: true, bossKeyEnabled: true, bossKeyAccelerator: "CommandOrControl+Alt+Space", clickThrough: false, locked: false }
+    window: { width: 380, height: 680, x: null, y: null, alwaysOnTop: true, trayOnly: true, bossKeyEnabled: true, bossKeyAccelerator: "CommandOrControl+Shift+Space", clickThrough: false, locked: false }
   };
 }
 

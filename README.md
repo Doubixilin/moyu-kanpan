@@ -1,6 +1,6 @@
 # 摸鱼看盘
 
-一个面向 Windows 使用场景的半透明桌面悬浮窗，用于低干扰查看 A 股行情、持仓规则提醒、法定公告与 AI 事件简析。
+一个面向 Windows 与 macOS 使用场景的半透明桌面悬浮窗，用于低干扰查看 A 股行情、持仓规则提醒、法定公告与 AI 事件简析。应用名称统一为“摸鱼看盘”。
 
 本项目以源码可用方式发布，允许个人研究、修改和非商业分发；商业使用不被许可。它不是 MIT 协议，也不属于 OSI 定义的开源软件，详见 [LICENSE](LICENSE)。
 
@@ -18,15 +18,18 @@
 - 支持一键复制脱敏事件上下文供 Coze 深度核验，不包含账户和仓位私密数据
 - 无 API Key 时使用本地规则分析，避免功能空白
 - 托盘菜单及全局快捷键支持显示/隐藏和点击穿透恢复
-- Windows `electron-builder` 打包脚本已预留
+- macOS 仅托盘驻留时同步隐藏 Dock，菜单栏使用系统 Template Image
+- Windows NSIS 与 macOS DMG 均使用 `electron-builder` 独立打包
 
 ## 开发
 
 ```bash
-npm install
+npm ci
 npm test
 npm run build
+npm run smoke:data
 npm run smoke:news
+npm run smoke:profile
 npm start
 ```
 
@@ -54,7 +57,7 @@ ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm rebuild electron
 
 默认配置不含持仓。`config/example-profile.json` 是可导入的公开模拟组合，四只代表性股票的模拟成本合计约 20 万元；其中警戒线只用于演示字段和影子模式，不会自动成为用户配置。
 
-AI 配置优先通过应用设置页完成。API Key 由 Electron 主进程使用系统安全存储加密保存，普通设置文件和渲染进程均无法读取明文。DeepSeek 默认配置为：
+AI 配置优先通过应用设置页完成。API Key 由 Electron 主进程使用系统安全存储加密保存；Windows 使用系统凭据保护能力，macOS 使用 Keychain。普通设置文件和渲染进程均无法读取明文，安全存储不可用时会拒绝明文保存。DeepSeek 默认配置为：
 
 ```text
 API 地址：https://api.deepseek.com
@@ -80,8 +83,8 @@ AI_MODEL=deepseek-v4-flash
 
 快捷键：
 
-- 默认老板键 `Ctrl+Alt+Space`：显示/隐藏窗口，可在设置页录制其他组合键
-- `Ctrl+Alt+X`：开启/关闭点击穿透；冲突时自动尝试 `Ctrl+Shift+F12`、`Ctrl+Alt+F10` 和 `Ctrl+Shift+F10`
+- 默认老板键 `CommandOrControl+Shift+Space`：显示/隐藏窗口，可在设置页录制其他组合键
+- `CommandOrControl+Alt+X`：开启/关闭点击穿透；冲突时自动尝试 `CommandOrControl+Shift+F12`、`CommandOrControl+Alt+F10` 和 `CommandOrControl+Shift+F10`
 
 ## 数据源说明
 
@@ -98,6 +101,29 @@ npm run package:win
 ```
 
 Windows 打包需要能下载 Electron 和 electron-builder 相关二进制。当前已在 Windows x64 上验证 NSIS 安装包构建成功；窗口透明、置顶、托盘和点击穿透行为仍应在每次相关修改后做一次短 GUI 验收。
+
+## macOS 开发与打包
+
+macOS 开发命令与上面的通用开发流程相同。`npm start` 会构建后启动 Electron；默认“仅托盘驻留”会隐藏 Dock 图标，仍可通过菜单栏图标和全局老板键显示或隐藏主窗口。
+
+在 Intel 或 Apple Silicon Mac 上运行：
+
+```bash
+npm run package:mac
+```
+
+脚本会检测当前 Node 进程架构，只构建本机的 `x64` 或 `arm64` 产物。输出位于 `release/`：
+
+- `release/mac-<arch>/摸鱼看盘.app`
+- `release/摸鱼看盘-<version>-<arch>.dmg`
+
+产物使用临时 ad-hoc 签名，适合本机开发验收；当前阶段没有 Developer ID 签名或公证，不用于正式互联网分发。打包校验会检查 ASAR 必需文件，并拒绝 `.env`、`personal.local.json`、疑似 API Key、开发机绝对路径和开发依赖。
+
+可单独验证本机 Electron 安全存储与系统通知支持：
+
+```bash
+npm run smoke:safe-storage
+```
 
 ## 免责声明
 

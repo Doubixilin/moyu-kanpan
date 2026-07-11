@@ -90,6 +90,7 @@ import {
 import { QuoteCoordinator } from "../src/services/quotes.js";
 import { createSingleFlight } from "../src/services/singleFlight.js";
 import { SettingsStore, settingsForRenderer } from "../src/settings/store.js";
+import { DEFAULT_BOSS_KEY_ACCELERATOR } from "../src/shortcut.js";
 import {
   exportProfile,
   previewProfileImport,
@@ -121,6 +122,7 @@ let tray: Tray | null = null;
 let newsAnalyzer: CachedNewsAnalyzer;
 let aiCredentialStore: EncryptedApiKeyStore;
 let aiCredentialSource: AiRuntimeStatus["credentialSource"] = "none";
+let secureStorageAvailable: boolean | null = null;
 let aiStatus: AiRuntimeStatus = {
   enabled: false,
   configured: false,
@@ -182,6 +184,31 @@ const quoteCoordinator = new QuoteCoordinator();
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
 
+function setWindowAlwaysOnTop(window: BrowserWindow, enabled: boolean): void {
+  if (enabled) {
+    window.setAlwaysOnTop(true, process.platform === "darwin" ? "floating" : "screen-saver");
+  } else {
+    window.setAlwaysOnTop(false);
+  }
+}
+
+function syncMacDockVisibility(): void {
+  if (process.platform !== "darwin" || !app.dock) return;
+  if (config.window.trayOnly) {
+    app.dock.hide();
+  } else {
+    void app.dock.show();
+  }
+}
+
+async function migrateConflictingMacDefaultShortcut(): Promise<void> {
+  if (process.platform !== "darwin" ||
+      config.window.bossKeyAccelerator !== "CommandOrControl+Alt+Space") return;
+  const next = toUserSettings(config);
+  next.window.bossKeyAccelerator = DEFAULT_BOSS_KEY_ACCELERATOR;
+  config = await settingsStore.save(next);
+}
+
 function createWindow(): BrowserWindow {
   const primaryWorkArea = screen.getPrimaryDisplay().workArea;
   const bounds = ensureVisibleWindowBounds(
@@ -197,6 +224,9 @@ function createWindow(): BrowserWindow {
     movable: !config.window.locked,
     maximizable: false,
     fullscreenable: false,
+    hasShadow: true,
+    roundedCorners: true,
+    hiddenInMissionControl: process.platform === "darwin" && config.window.trayOnly,
     alwaysOnTop: config.window.alwaysOnTop,
     skipTaskbar: config.window.trayOnly,
     backgroundColor: "#00000000",
@@ -211,7 +241,7 @@ function createWindow(): BrowserWindow {
 
   hardenRendererWindow(window);
 
-  if (config.window.alwaysOnTop) window.setAlwaysOnTop(true, "screen-saver");
+  setWindowAlwaysOnTop(window, config.window.alwaysOnTop);
   window.setIgnoreMouseEvents(clickThrough, { forward: true });
   if (devServerUrl) {
     void window.loadURL(devServerUrl);
@@ -232,6 +262,8 @@ function createWindow(): BrowserWindow {
     event.preventDefault();
     window.hide();
     settingsWindow?.hide();
+    restoreConfiguredAlwaysOnTop();
+    syncMacDockVisibility();
   });
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
@@ -244,14 +276,21 @@ function openSettingsWindow(): void {
     settingsWindow.show();
     settingsWindow.moveTop();
     settingsWindow.focus();
+    syncMacDockVisibility();
+    scheduleSecureStorageAvailabilityCheck();
     return;
   }
 
+  const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const bounds = ensureVisibleWindowBounds(
+    { width: 660, height: 780, x: null, y: null },
+    [workArea],
+    workArea
+  );
   const window = new BrowserWindow({
-    width: 660,
-    height: 780,
-    minWidth: 560,
-    minHeight: 620,
+    ...bounds,
+    minWidth: Math.min(560, bounds.width),
+    minHeight: Math.min(620, bounds.height),
     title: "摸鱼看盘设置",
     autoHideMenuBar: true,
     skipTaskbar: config.window.trayOnly,
@@ -277,12 +316,43 @@ function openSettingsWindow(): void {
   window.on("closed", () => {
     if (settingsWindow === window) settingsWindow = null;
     restoreConfiguredAlwaysOnTop();
+    syncMacDockVisibility();
   });
+  window.on("hide", () => {
+    restoreConfiguredAlwaysOnTop();
+    syncMacDockVisibility();
+  });
+  window.on("show", syncMacDockVisibility);
+  scheduleSecureStorageAvailabilityCheck();
+}
+
+function scheduleSecureStorageAvailabilityCheck(): void {
+  if (secureStorageAvailable != null) return;
+  setTimeout(() => {
+    if (secureStorageAvailable != null || !aiCredentialStore) return;
+    try {
+      secureStorageAvailable = aiCredentialStore.isAvailable();
+    } catch {
+      secureStorageAvailable = false;
+    }
+    setAiReadyStatus();
+    pushAiStatus();
+  }, 0);
 }
 function createTray(): void {
   if (tray) return;
-  const icon = nativeImage.createFromDataURL(TRAY_ICON_DATA_URL).resize({ width: 16, height: 16 });
+  const macTemplateIcon = process.platform === "darwin"
+    ? nativeImage.createFromNamedImage("chart.line.uptrend.xyaxis")
+    : null;
+  const icon = macTemplateIcon && !macTemplateIcon.isEmpty()
+    ? macTemplateIcon
+    : nativeImage.createFromDataURL(TRAY_ICON_DATA_URL).resize({
+        width: 16,
+        height: 16,
+        quality: "best"
+      });
   if (icon.isEmpty()) throw new Error("Failed to create tray icon");
+  if (process.platform === "darwin") icon.setTemplateImage(true);
 
   tray = new Tray(icon);
   tray.setToolTip("摸鱼看盘");
@@ -440,11 +510,7 @@ async function persistWindowBounds(window: BrowserWindow): Promise<void> {
 
 function restoreConfiguredAlwaysOnTop(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (config.window.alwaysOnTop) {
-    mainWindow.setAlwaysOnTop(true, "screen-saver");
-  } else {
-    mainWindow.setAlwaysOnTop(false);
-  }
+  setWindowAlwaysOnTop(mainWindow, config.window.alwaysOnTop);
 }
 
 function applyWindowPreferences(): void {
@@ -461,14 +527,14 @@ function applyWindowPreferences(): void {
     mainWindow.setMaximizable(false);
     mainWindow.setFullScreenable(false);
     mainWindow.setIgnoreMouseEvents(clickThrough, { forward: true });
+    if (process.platform === "darwin") {
+      mainWindow.setHiddenInMissionControl(config.window.trayOnly);
+    }
   }
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.setSkipTaskbar(config.window.trayOnly);
   }
-  if (process.platform === "darwin" && app.dock) {
-    if (config.window.trayOnly) app.dock.hide();
-    else void app.dock.show();
-  }
+  syncMacDockVisibility();
 }
 function loadEnvironmentFiles(): void {
   const candidates = [
@@ -910,7 +976,7 @@ function setAiReadyStatus(message?: string): void {
     ...aiStatus,
     enabled: config.ai.enabled,
     configured,
-    secureStorageAvailable: aiCredentialStore?.isAvailable() ?? false,
+    secureStorageAvailable: secureStorageAvailable ?? false,
     credentialSource: aiCredentialSource,
     state: configured ? "ready" : "unconfigured",
     provider: config.ai.provider,
@@ -942,7 +1008,9 @@ async function initializeAiCredentials(): Promise<void> {
   let credentialError = "";
   try {
     secureKey = await aiCredentialStore.read();
+    if (secureKey) secureStorageAvailable = true;
   } catch (error) {
+    secureStorageAvailable = false;
     credentialError = safeAiError(error);
   }
 
@@ -964,6 +1032,7 @@ async function initializeAiCredentials(): Promise<void> {
 async function setAiApiKey(value: unknown): Promise<AiRuntimeStatus> {
   if (typeof value !== "string") throw new Error("API Key 无效");
   await aiCredentialStore.write(value);
+  secureStorageAvailable = true;
   config.ai.apiKey = value.trim();
   aiCredentialSource = "secure";
   setAiReadyStatus("API Key 已通过系统安全存储加密保存");
@@ -1369,11 +1438,13 @@ async function updateWindowSettings(patch: Partial<WindowSettings>): Promise<Use
 
 function hideMainWindow(): void {
   mainWindow?.hide();
+  syncMacDockVisibility();
 }
 
 function toggleWindow(fromBossKey: boolean): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
     mainWindow = createWindow();
+    syncMacDockVisibility();
     return;
   }
 
@@ -1385,6 +1456,7 @@ function toggleWindow(fromBossKey: boolean): void {
       settingsWindow?.hide();
       restoreConfiguredAlwaysOnTop();
     }
+    syncMacDockVisibility();
     return;
   }
   revealMainWindow();
@@ -1399,6 +1471,19 @@ function revealMainWindow(): void {
   mainWindow.show();
   mainWindow.moveTop();
   if (!clickThrough) mainWindow.focus();
+  syncMacDockVisibility();
+}
+
+async function persistWindowBoundsForShutdown(): Promise<void> {
+  if (!settingsStore || !config || !mainWindow || mainWindow.isDestroyed() ||
+      config.window.locked || mainWindow.isMaximized() ||
+      mainWindow.isFullScreen() || mainWindow.isMinimized()) return;
+  const bounds = mainWindow.getBounds();
+  if (config.window.x === bounds.x && config.window.y === bounds.y &&
+      config.window.width === bounds.width && config.window.height === bounds.height) return;
+  const next = toUserSettings(config);
+  next.window = { ...next.window, ...bounds };
+  config = await settingsStore.save(next);
 }
 
 function recoverNormalWindowState(window: BrowserWindow): void {
@@ -1458,6 +1543,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     findPersonalSeedPath()
   );
   config = await settingsStore.load();
+  await migrateConflictingMacDefaultShortcut();
   const settingsRecoveryMessage = settingsStore.consumeRecoveryMessage();
   if (settingsRecoveryMessage) latestErrors = upsertError(latestErrors, `settings:${settingsRecoveryMessage}`);
   aiCredentialStore = new EncryptedApiKeyStore(
@@ -1504,6 +1590,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   registerIpc();
   mainWindow = createWindow();
   createTray();
+  applyWindowPreferences();
   registerGlobalShortcuts();
   powerMonitor.on("resume", refreshAfterConnectivityChange);
 
@@ -1531,6 +1618,7 @@ app.on("before-quit", (event) => {
   if (newsPollTimer) clearInterval(newsPollTimer);
   void (async () => {
     try {
+      await persistWindowBoundsForShutdown();
       if (alertEngine && alertStateStore) await persistAlertState();
     } catch (error) {
       console.error("Failed to persist shutdown state", error);
