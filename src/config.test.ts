@@ -4,6 +4,7 @@ import {
   activeSecurityCodes,
   assertSavableSettings,
   loadAppConfigFromObject,
+  preserveRuntimeSecrets,
   toUserSettings
 } from "./config";
 import { parseBossKeyAccelerator } from "./shortcut";
@@ -164,6 +165,18 @@ describe("config", () => {
       /不能写入普通设置/
     );
   });
+
+  it("preserves the secure runtime API key when public settings are saved", () => {
+    const current = loadAppConfigFromObject({}, { AI_API_KEY: "secure-runtime-key" });
+    const persisted = loadAppConfigFromObject(
+      JSON.parse(JSON.stringify(toUserSettings(current))),
+      {}
+    );
+
+    assert.equal(persisted.ai.apiKey, "");
+    assert.equal(preserveRuntimeSecrets(persisted, current).ai.apiKey, "secure-runtime-key");
+  });
+
   it("enables the Market tab once during schema 6 migration", () => {
     const migrated = loadAppConfigFromObject({
       schemaVersion: 5,

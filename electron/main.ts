@@ -31,6 +31,7 @@ import {
 import {
   activeSecurityCodes,
   loadAppConfigFromObject,
+  preserveRuntimeSecrets,
   toUserSettings,
   type AiSettings,
   type AppConfig,
@@ -502,7 +503,7 @@ async function persistWindowBounds(window: BrowserWindow): Promise<void> {
   const next = toUserSettings(config);
   next.window = { ...next.window, ...bounds };
   try {
-    config = await settingsStore.save(next);
+    config = preserveRuntimeSecrets(await settingsStore.save(next), config);
   } catch (error) {
     latestErrors = upsertError(latestErrors, "window:" + errorMessage(error));
     pushSnapshot();
@@ -1404,8 +1405,7 @@ async function saveSettings(
     }
 
     latestErrors = latestErrors.filter((error) => !error.startsWith("shortcut:"));
-    saved.ai.apiKey = previous.ai.apiKey;
-    config = saved;
+    config = preserveRuntimeSecrets(saved, previous);
     setAiReadyStatus();
     applyWindowPreferences();
     updateTrayMenu();
