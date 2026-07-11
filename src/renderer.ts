@@ -336,8 +336,9 @@ function renderHoldings(next: AppSnapshot): string {
     <div class="holdings-page">
       <div class="portfolio-summary">
         <span><small>持仓市值</small><strong>${formatMoney(totals.marketValue)}</strong></span>
-        <span class="${numberDirection(next.risk.portfolio.dailyPnl)}"><small>今日盈亏${formatRLabel(next.risk.portfolio.dailyPnlR)}</small><strong>${formatSignedMoney(next.risk.portfolio.dailyPnl)}</strong></span>
+        <span class="${numberDirection(next.risk.portfolio.dailyPnl)}"><small>今日盈亏*${formatRLabel(next.risk.portfolio.dailyPnlR)}</small><strong>${formatSignedMoney(next.risk.portfolio.dailyPnl)}</strong></span>
         <span class="${numberDirection(totalProfit)}"><small>累计盈亏${formatRLabel(next.risk.portfolio.totalPnlR)}</small><strong>${formatSignedMoney(totalProfit)} / ${formatPercent(totalPercent)}</strong></span>
+        ${next.settings.holdings.length ? '<p class="pnl-note">* 当日有买卖时，今日盈亏仅供参考</p>' : ""}
       </div>
       ${renderRiskStatus(next)}
       <div class="scroll-list holding-list">${rows}</div>
