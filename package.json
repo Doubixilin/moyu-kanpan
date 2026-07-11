@@ -42,6 +42,7 @@
       "dist-electron/**",
       "config/**",
       "!config/personal.local.json",
+      "resources/icons/**",
       "LICENSE",
       "README.md",
       "package.json"
@@ -50,7 +51,8 @@
       "output": "release"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "resources/icons/app.ico"
     }
   }
 }

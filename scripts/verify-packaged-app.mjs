@@ -29,6 +29,8 @@ for (const required of [
   "dist-electron/electron/main.js",
   "dist-electron/electron/preload.cjs",
   "config/defaults.json",
+  "resources/icons/app-256.png",
+  "resources/icons/tray.png",
   "LICENSE"
 ]) {
   if (!stdout.replaceAll("\\", "/").includes(required)) {
