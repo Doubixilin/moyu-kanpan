@@ -21,6 +21,7 @@
     "smoke:news": "npm run build && node scripts/smoke-news-events.mjs",
     "smoke:profile": "npm run build && node scripts/smoke-profile.mjs",
     "smoke:safe-storage": "electron scripts/smoke-safe-storage.cjs",
+    "smoke:ai-credential": "npm run build && electron scripts/smoke-ai-credential.cjs",
     "start": "npm run build && electron .",
     "clean:release": "node scripts/clean-release.mjs",
     "package:win": "npm run clean:release && npm run build && electron-builder --win --x64 --publish never && node scripts/verify-packaged-app.mjs",

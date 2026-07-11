@@ -131,7 +131,7 @@
 
 ## 7. 测试覆盖的实际边界
 
-91.23% 是修复前审计时领域、服务和 provider 文件的覆盖率，不包含 `electron/main.ts`、`renderer.ts` 和 `settingsRenderer.ts` 的完整真实运行覆盖。最终版本增加了安全边界、原子写入、损坏恢复、来源状态、AI namespace、profile 一致性、提醒 rebase、macOS 平台边界和页面恢复等测试，总计 138 项；原生全局快捷键、拖动与多显示器仍应保留人工 GUI 验收。
+91.23% 是修复前审计时领域、服务和 provider 文件的覆盖率，不包含 `electron/main.ts`、`renderer.ts` 和 `settingsRenderer.ts` 的完整真实运行覆盖。最终版本增加了安全边界、原子写入、损坏恢复、来源状态、AI namespace、profile 一致性、提醒 rebase、macOS 平台边界、页面恢复和凭据保存调用点等测试，总计 140 项；原生全局快捷键、拖动与多显示器仍应保留人工 GUI 验收。
 
 ## 8. macOS Apple Silicon 适配与实机验证（2026-07-11）
 
@@ -154,13 +154,14 @@
 
 | 检查 | macOS 结果 |
 | --- | --- |
-| `npm ci` | 通过 |
-| `npm test` | 138 项通过 |
+| `npm ci` / `npm install` | 通过；完整依赖树 0 个已知漏洞 |
+| `npm test` | 140 项通过 |
 | `npm run build` | 通过 |
 | `npm run smoke:data` | 通过；东财/腾讯双源一致，覆盖率 100%，市场概览、241 点分时、120 根日 K 与 BOLL 正常 |
 | `npm run smoke:news` | 通过；东财、巨潮、上交所、深交所、证监会均成功，52 份文档聚合为 41 个事件，其中 6 个合并事件 |
 | `npm run smoke:profile` | 通过；公开模拟配置 4/4 行情齐全，默认配置持仓仍为空 |
 | `npm run smoke:safe-storage` | 通过；`safeStorage` 可用且加解密往返成功，系统通知 API 可用；测试未读取或打印任何真实 Key |
+| `npm run smoke:ai-credential` | 通过；临时凭据只写密文，窗口 bounds 保存和普通设置保存均保留运行时凭据，清除后安全存储为空 |
 | `npm run package:mac` | 通过；生成 arm64 `.app` 与 DMG，ASAR 必需内容和泄漏扫描通过 |
 | 签名与磁盘映像 | `codesign --verify --deep --strict` 通过；DMG CRC 校验、挂载和挂载内 `.app` 签名验证通过；未做 Developer ID 签名或公证 |
 | 独立启动 | 从仓库外空目录、隔离 userData 启动；主进程和 3 个子进程稳定，设置、SQLite 和缓存只写入隔离 userData，空工作目录保持为空 |
@@ -177,3 +178,18 @@
 - 应用从仓库外空目录、隔离 userData 运行完成以上操作，未向启动目录写文件。
 
 仍需人工补测：桌面自动化注入的组合键没有触发 Electron `globalShortcut`，无法据此判定物理老板键与穿透恢复快捷键；自动化拖动也未触发 `-webkit-app-region` 的原生窗口移动。托盘状态项菜单和多显示器拖动恢复未被辅助功能树暴露。因此发布前仍建议用物理键盘验证一次老板键和快捷键失败提示，并在真实双屏环境手动拖动、重启及检查托盘退出。未配置真实 API Key，AI 在线连通测试按安全要求留给持有者在本机完成。
+
+## 9. AI 安全凭据保存专项复核（2026-07-11）
+
+远程 `main` 的 `a15d288` 已包含 `preserveRuntimeSecrets(saved, current)`、窗口 bounds 保存和普通设置保存两处调用，以及“不丢失安全运行时 API Key”的回归测试。macOS 分支合入该提交后，又增加了调用点静态回归测试和 `smoke:ai-credential`，防止未来只保留 helper、却误删主进程调用。
+
+专项验证全部使用随机生成、不可用于真实服务的临时值及隔离 userData；没有读取用户凭据、个人持仓或本机真实配置，也没有在日志、截图或审计记录中输出临时值明文。
+
+- Electron `safeStorage` 在本机可用；临时凭据加密往返成功，凭据文件存在且不含明文。
+- 打包 `.app` 的设置页保存后显示“已安全配置”，密码输入框恢复为空且仅显示安全存储占位文案。
+- 重启打包应用后仍从安全存储恢复为已配置；普通设置保存、置顶和点击穿透切换、页面切换，以及主窗口从 380×520 缩放到 352×482 后的 bounds 自动保存，均未丢失运行时凭据。
+- 跨过一轮 60 秒新闻刷新后仍为已配置。用不可用临时值测试连接时显示明确的鉴权错误，没有误报“未配置 API Key”。
+- 开发版从当前源码和隔离 userData 启动成功；自动 smoke 在开发 Electron 进程中覆盖安全存储、bounds 保存、普通设置保存和清除流程，行为与打包版一致。
+- `settings.json`、profile、缓存及界面快照继续不包含凭据；凭据只保存在隔离 userData 的加密凭据文件中。
+
+GUI 自动化无法触发 `-webkit-app-region` 的窗口移动，但同一 `persistWindowBounds()` 路径已通过真实缩放自动保存和调用点回归测试覆盖。物理拖动后再次检查状态仍建议作为发布前的一次手工确认。

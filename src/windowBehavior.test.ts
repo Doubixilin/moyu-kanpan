@@ -27,6 +27,23 @@ describe("boss key window safety", () => {
     assert.match(renderer, /render\(emptySnapshot\);\s*navigationInitialized = false;/);
   });
 
+  it("keeps secure runtime credentials across bounds and public settings saves", async () => {
+    const main = await readFile(path.join(process.cwd(), "electron", "main.ts"), "utf8");
+
+    const boundsStart = main.indexOf("async function persistWindowBounds");
+    const boundsEnd = main.indexOf("function restoreConfiguredAlwaysOnTop", boundsStart);
+    const boundsSave = main.slice(boundsStart, boundsEnd);
+    assert.match(
+      boundsSave,
+      /config = preserveRuntimeSecrets\(await settingsStore\.save\(next\), config\)/
+    );
+
+    const settingsStart = main.indexOf("async function saveSettings");
+    const settingsEnd = main.indexOf("async function toggleTheme", settingsStart);
+    const publicSettingsSave = main.slice(settingsStart, settingsEnd);
+    assert.match(publicSettingsSave, /config = preserveRuntimeSecrets\(saved, previous\)/);
+  });
+
   it("keeps macOS Dock, tray template image and floating level platform-aware", async () => {
     const main = await readFile(path.join(process.cwd(), "electron", "main.ts"), "utf8");
     assert.match(main, /app\.setName\("摸鱼看盘"\)/);
