@@ -50,7 +50,8 @@ describe("boss key window safety", () => {
     assert.match(main, /process\.platform === "darwin" \? "floating" : "screen-saver"/);
     assert.match(main, /app\.dock\.hide\(\)/);
     assert.match(main, /app\.dock\.show\(\)/);
-    assert.match(main, /createFromNamedImage\("chart\.line\.uptrend\.xyaxis"\)/);
+    assert.match(main, /resources\/icons\/trayTemplate\.png/);
+    assert.match(main, /createFromPath\(MAC_TRAY_TEMPLATE_ICON_PATH\)/);
     assert.match(main, /setTemplateImage\(true\)/);
     assert.match(main, /setHiddenInMissionControl\(config\.window\.trayOnly\)/);
     assert.match(main, /migrateConflictingMacDefaultShortcut\(\)/);
@@ -70,17 +71,24 @@ describe("boss key window safety", () => {
     ) as {
       scripts: Record<string, string>;
       productName: string;
-      build: { win: { target: string }; mac: { target: string; identity: string } };
+      build: {
+        win: { target: string; icon: string };
+        mac: { target: string; identity: string; icon: string };
+      };
     };
     assert.equal(packageJson.productName, "摸鱼看盘");
     assert.match(packageJson.scripts["package:win"] ?? "", /--win --x64/);
     assert.match(packageJson.scripts["package:mac"] ?? "", /package-mac\.mjs/);
     assert.equal(packageJson.build.win.target, "nsis");
+    assert.equal(packageJson.build.win.icon, "resources/icons/app.ico");
     assert.equal(packageJson.build.mac.target, "dmg");
     assert.equal(packageJson.build.mac.identity, "-");
+    assert.equal(packageJson.build.mac.icon, "resources/icons/app.icns");
 
     const packager = await readFile(path.join(process.cwd(), "scripts", "package-mac.mjs"), "utf8");
     assert.match(packager, /process\.arch/);
     assert.match(packager, /`--\$\{process\.arch\}`/);
+    assert.match(packager, /node_modules", "electron", "dist/);
+    assert.match(packager, /--config\.electronDist=/);
   });
 });

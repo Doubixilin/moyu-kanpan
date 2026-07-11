@@ -105,6 +105,12 @@ const SETTINGS_RENDERER_PATH = path.join(__dirname, "../../dist/settings.html");
 const LOCAL_RENDERER_URLS = [MAIN_RENDERER_PATH, SETTINGS_RENDERER_PATH]
   .map((entry) => pathToFileURL(entry).toString());
 const ALLOWED_ENV_KEYS = ["AI_API_KEY", "AI_API_BASE_URL", "AI_MODEL"] as const;
+const APP_ICON_PATH = path.join(__dirname, "../../resources/icons/app-256.png");
+const TRAY_ICON_PATH = path.join(__dirname, "../../resources/icons/tray.png");
+const MAC_TRAY_TEMPLATE_ICON_PATH = path.join(
+  __dirname,
+  "../../resources/icons/trayTemplate.png"
+);
 
 const CLICK_THROUGH_SHORTCUT_CANDIDATES = [
   "CommandOrControl+Alt+X",
@@ -112,9 +118,6 @@ const CLICK_THROUGH_SHORTCUT_CANDIDATES = [
   "CommandOrControl+Alt+F10",
   "CommandOrControl+Shift+F10"
 ];
-const TRAY_ICON_DATA_URL =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAACTSURBVHgBpZKBCYAgEEV/TeAIjuIIbdQIuUGt0CS1gW1iZ2jIVaTnhw+Cvs8/OYDJA4Y8kR3ZR2/kmazxJbpUEfQ/Dm/UG7wVwHkjlQdMFfDdJMFaACebnjJGyDWgcnZu1/lrCrl6NCoEHJBrDwEr5NrT6ko/UV8xdLAC2N49mlc5CylpYh8wCwqrvbBGLoKGvz8Bfq0QPWEUo/EAAAAASUVORK5CYII=";
-
 let config: AppConfig;
 let settingsStore: SettingsStore;
 let mainWindow: BrowserWindow | null = null;
@@ -231,6 +234,7 @@ function createWindow(): BrowserWindow {
     hiddenInMissionControl: process.platform === "darwin" && config.window.trayOnly,
     alwaysOnTop: config.window.alwaysOnTop,
     skipTaskbar: config.window.trayOnly,
+    icon: APP_ICON_PATH,
     backgroundColor: "#00000000",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -296,6 +300,7 @@ function openSettingsWindow(): void {
     title: "摸鱼看盘设置",
     autoHideMenuBar: true,
     skipTaskbar: config.window.trayOnly,
+    icon: APP_ICON_PATH,
     backgroundColor: "#f3f4f6",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -343,12 +348,9 @@ function scheduleSecureStorageAvailabilityCheck(): void {
 }
 function createTray(): void {
   if (tray) return;
-  const macTemplateIcon = process.platform === "darwin"
-    ? nativeImage.createFromNamedImage("chart.line.uptrend.xyaxis")
-    : null;
-  const icon = macTemplateIcon && !macTemplateIcon.isEmpty()
-    ? macTemplateIcon
-    : nativeImage.createFromDataURL(TRAY_ICON_DATA_URL).resize({
+  const icon = process.platform === "darwin"
+    ? nativeImage.createFromPath(MAC_TRAY_TEMPLATE_ICON_PATH)
+    : nativeImage.createFromPath(TRAY_ICON_PATH).resize({
         width: 16,
         height: 16,
         quality: "best"

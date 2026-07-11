@@ -429,6 +429,17 @@ h1 {
   font-size: 13px;
 }
 
+.pnl-note {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  padding-top: 3px;
+  border-top: 1px solid rgb(255 255 255 / 0.05);
+  color: rgb(237 242 244 / 0.48);
+  font-size: 8px;
+  line-height: 1.3;
+  text-align: right;
+}
+
 .up .quote-metric strong,
 .holding-metrics .up strong,
 .portfolio-summary .up strong {

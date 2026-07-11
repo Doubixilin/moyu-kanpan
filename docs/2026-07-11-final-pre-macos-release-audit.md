@@ -131,7 +131,7 @@
 
 ## 7. 测试覆盖的实际边界
 
-91.23% 是修复前审计时领域、服务和 provider 文件的覆盖率，不包含 `electron/main.ts`、`renderer.ts` 和 `settingsRenderer.ts` 的完整真实运行覆盖。最终版本增加了安全边界、原子写入、损坏恢复、来源状态、AI namespace、profile 一致性、提醒 rebase、macOS 平台边界、页面恢复和凭据保存调用点等测试，总计 140 项；原生全局快捷键、拖动与多显示器仍应保留人工 GUI 验收。
+91.23% 是修复前审计时领域、服务和 provider 文件的覆盖率，不包含 `electron/main.ts`、`renderer.ts` 和 `settingsRenderer.ts` 的完整真实运行覆盖。最终版本增加了安全边界、原子写入、损坏恢复、来源状态、AI namespace、profile 一致性、提醒 rebase、macOS 平台边界、页面恢复和凭据保存调用点等测试，总计 141 项；原生全局快捷键、拖动与多显示器仍应保留人工 GUI 验收。
 
 ## 8. macOS Apple Silicon 适配与实机验证（2026-07-11）
 
@@ -142,7 +142,7 @@
 - “仅托盘驻留”在 macOS 同步调用 `app.dock.hide()` / `app.dock.show()`，并同步 Mission Control 可见性；主窗口、设置窗口、托盘和老板键路径均复用同一 Dock 状态同步函数。
 - macOS 置顶层级使用 `floating`，Windows 继续使用既有 `screen-saver`；主窗口继续禁止最大化和全屏，恢复显示前会修复瞬态状态与出屏位置。
 - 设置窗口按当前指针所在显示器的 work area 居中；设置窗口隐藏或关闭时恢复主窗口配置的置顶状态。
-- 菜单栏托盘优先使用系统 SF Symbol `chart.line.uptrend.xyaxis` 并标记为 Template Image，失败时回退到既有透明图标；Windows 托盘路径保持不变。
+- 菜单栏托盘使用由正式鱼形行情 Logo 生成的单色 Template Image，并显式调用 `setTemplateImage(true)`；Windows 托盘路径保持不变。
 - 默认老板键改为 `CommandOrControl+Shift+Space`，避开 macOS 默认占用的 `Command+Option+Space`；macOS 启动时仅迁移该旧默认值，不改写用户自定义组合键。
 - 退出流程在提醒状态落盘前显式刷新主窗口 bounds，避免退出前最后一次移动尚在防抖计时器中。
 - 未保存凭据时不再让 Keychain 可用性探测阻塞启动热路径；锁屏实测曾复现 ad-hoc 重签后 Keychain 查询等待，调整后同一锁屏会话可正常创建主窗口、渲染进程、SQLite 与缓存。打开设置或实际保存 Key 时仍会探测安全存储，失败时继续拒绝明文。
@@ -155,7 +155,7 @@
 | 检查 | macOS 结果 |
 | --- | --- |
 | `npm ci` / `npm install` | 通过；完整依赖树 0 个已知漏洞 |
-| `npm test` | 140 项通过 |
+| `npm test` | 141 项通过 |
 | `npm run build` | 通过 |
 | `npm run smoke:data` | 通过；东财/腾讯双源一致，覆盖率 100%，市场概览、241 点分时、120 根日 K 与 BOLL 正常 |
 | `npm run smoke:news` | 通过；东财、巨潮、上交所、深交所、证监会均成功，52 份文档聚合为 41 个事件，其中 6 个合并事件 |
@@ -194,3 +194,23 @@
 - `settings.json`、profile、缓存及界面快照继续不包含凭据；凭据只保存在隔离 userData 的加密凭据文件中。
 
 GUI 自动化无法触发 `-webkit-app-region` 的窗口移动，但同一 `persistWindowBounds()` 路径已通过真实缩放自动保存和调用点回归测试覆盖。物理拖动后再次检查状态仍建议作为发布前的一次手工确认。
+
+## 10. 正式图标与最新 main 同步复核（2026-07-11）
+
+macOS 分支已同步远程 `main` 的 `4c37694d938d3ece507772289508f877b7ee8755`，其中包含当日盈亏说明提交 `6235322` 和正式应用 Logo 提交 `4c37694`；Windows 图标、NSIS 配置和既有 Windows 代码均保留。
+
+图标与打包：
+
+- `resources/icons/app.icns` 由 1024×1024 透明母版 `resources/icons/app.png` 生成，包含 16、32、64、128、256、512 和 1024 像素对应的标准 macOS 表示；`electron-builder` 的 `mac.icon` 已指向该文件，未使用 Windows ICO。
+- `resources/icons/trayTemplate.png`（22×16）和 `trayTemplate@2x.png`（44×32）保留鱼形、行情折线和 K 线轮廓，使用透明背景和单色 alpha，并在运行时标记为 Template Image。浅色/深色背景预览均清晰；实际状态项成功创建并驻留，但菜单栏状态项不向当前辅助功能树暴露，仍建议发布前肉眼复核一次两种系统外观。
+- Finder 图标视图已实际显示新的鱼形行情 Logo。`.app` 的 `CFBundleIconFile` 为 `icon.icns`，包内图标与仓库 `app.icns` 的 SHA-256 完全一致；Dock、启动台、应用切换器和通知都由该 bundle 图标供给。Dock、启动台、应用切换器以及实际系统通知图标没有分别截图，通知只验证了 Electron API 可用且默认无声音行为未改。
+- 打包 ASAR 已确认包含 `app.icns`、窗口图标、彩色托盘回退资源和普通/@2x Template Image；运行时均从 `__dirname` 相对路径读取，不依赖仓库绝对路径。
+- `npm run package:mac` 使用本机已安装的 Electron arm64 分发内容创建临时归档，避免环境代理下载中断；产物仍由 `electron-builder` 正确重命名、ad-hoc 签名并生成标准 `.app` 与 DMG。该临时归档在构建结束后删除，不进入产物。
+
+界面与业务同等性：
+
+- Retina 实机中，市场概览、241 点分时、120 根日 K 和 BOLL 均清晰无模糊；标准彩色与低调灰阶模式的线条可辨认。主窗口从 380×520 放大到约 500×620 后，图表宽高和标签正确重排，没有裁切，算法与指标未改。
+- 空持仓时主窗口不显示脚注；使用公开测试证券加入隔离持仓后，主窗口显示“今日盈亏*”及“* 当日有买卖时，今日盈亏仅供参考”，设置页显示“交易后请同步数量和券商成本价；当日有买卖时，今日盈亏仅供参考。”。主窗口脚注保持低调，并将字号由 7px 微调至 8px、对比度略提高以保证 Retina 下可读；文案和计算逻辑未改。
+- 合并后重新执行 AI 凭据专项 smoke：Keychain 支撑的 `safeStorage` 可用，密文往返、明文缺失、bounds 保存、普通设置保存、主动清除全部通过。`preserveRuntimeSecrets()` 及两个主进程调用点、回归测试均仍存在；打包版重启、缩放、页面/透明度/置顶/穿透切换和跨新闻刷新验证结果见第 9 节。物理拖动窗口仍受桌面自动化限制，需人工补一次。
+
+最终验证：141 项单元/服务测试通过，TypeScript/Electron 构建通过，行情、新闻、profile、safeStorage 和 AI 凭据 smoke 全部通过。最终 `.app` 与 DMG 均通过严格深度签名校验，DMG CRC、挂载及挂载内 `.app` 校验通过；从仓库外空目录和隔离 userData 启动后加载 ASAR 页面，空启动目录保持无文件，设置、SQLite 与缓存只写入隔离 userData。

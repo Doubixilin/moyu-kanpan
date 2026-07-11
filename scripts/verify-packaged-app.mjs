@@ -38,6 +38,11 @@ for (const required of [
   "dist-electron/electron/main.js",
   "dist-electron/electron/preload.cjs",
   "config/defaults.json",
+  "resources/icons/app-256.png",
+  "resources/icons/app.icns",
+  "resources/icons/tray.png",
+  "resources/icons/trayTemplate.png",
+  "resources/icons/trayTemplate@2x.png",
   "LICENSE"
 ]) {
   if (!normalizedListing.includes(required)) {
@@ -101,7 +106,12 @@ async function resolveMacPackage(releaseEntries) {
     const asarPath = path.join(appPath, "Contents", "Resources", "app.asar");
     return {
       asarPath,
-      artifacts: [asarPath, appPath, path.join(releaseDir, archive.name)]
+      artifacts: [
+        asarPath,
+        appPath,
+        path.join(appPath, "Contents", "Resources", "icon.icns"),
+        path.join(releaseDir, archive.name)
+      ]
     };
   }
   throw new Error("macOS .app bundle was not produced");

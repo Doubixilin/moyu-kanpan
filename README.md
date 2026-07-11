@@ -18,7 +18,7 @@
 - 支持一键复制脱敏事件上下文供 Coze 深度核验，不包含账户和仓位私密数据
 - 无 API Key 时使用本地规则分析，避免功能空白
 - 托盘菜单及全局快捷键支持显示/隐藏和点击穿透恢复
-- macOS 仅托盘驻留时同步隐藏 Dock，菜单栏使用系统 Template Image
+- macOS 仅托盘驻留时同步隐藏 Dock，菜单栏使用鱼形行情 Logo 的单色 Template Image
 - Windows NSIS 与 macOS DMG 均使用 `electron-builder` 独立打包
 
 ## 开发
@@ -119,10 +119,19 @@ npm run package:mac
 
 产物使用临时 ad-hoc 签名，适合本机开发验收；当前阶段没有 Developer ID 签名或公证，不用于正式互联网分发。打包校验会检查 ASAR 必需文件，并拒绝 `.env`、`personal.local.json`、疑似 API Key、开发机绝对路径和开发依赖。
 
+macOS 应用图标来自 `resources/icons/app.icns`，菜单栏使用 `trayTemplate.png` 和 `trayTemplate@2x.png`。它们都由正式母版 `resources/icons/app.png` 生成；需要重建资产时，在装有 Pillow 和 Xcode Command Line Tools 的 macOS 开发机运行：
+
+```bash
+python3 scripts/generate-macos-icons.py resources/icons/app.png resources/icons
+```
+
+生成后的 `.icns` 和 Template Image 已提交到仓库，正常构建和打包不依赖 Python。
+
 可单独验证本机 Electron 安全存储与系统通知支持：
 
 ```bash
 npm run smoke:safe-storage
+npm run smoke:ai-credential
 ```
 
 ## 免责声明

@@ -24,5 +24,6 @@ describe("settings renderer build contract", () => {
     }
     assert.match(entry, /settings-page-section/);
     assert.match(entry, /handleHoldingRuleToggle/);
+    assert.match(entry, /当日有买卖时，今日盈亏仅供参考/);
   });
 });

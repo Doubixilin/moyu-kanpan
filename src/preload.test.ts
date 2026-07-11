@@ -5,6 +5,16 @@ import { fileURLToPath } from "node:url";
 
 const mainPath = fileURLToPath(new URL("../electron/main.ts", import.meta.url));
 const preloadPath = fileURLToPath(new URL("../electron/preload.cts", import.meta.url));
+const packagePath = fileURLToPath(new URL("../package.json", import.meta.url));
+const appIconPath = fileURLToPath(new URL("../resources/icons/app.ico", import.meta.url));
+const macAppIconPath = fileURLToPath(new URL("../resources/icons/app.icns", import.meta.url));
+const trayIconPath = fileURLToPath(new URL("../resources/icons/tray.png", import.meta.url));
+const macTrayIconPath = fileURLToPath(
+  new URL("../resources/icons/trayTemplate.png", import.meta.url)
+);
+const macTray2xIconPath = fileURLToPath(
+  new URL("../resources/icons/trayTemplate@2x.png", import.meta.url)
+);
 
 describe("Electron preload build contract", () => {
   it("uses a CommonJS preload entry that Electron can execute", () => {
@@ -16,5 +26,21 @@ describe("Electron preload build contract", () => {
     assert.match(preload, /ai:setApiKey/);
     assert.match(main, /safeStorage\.encryptString/);
     assert.match(main, /ai-credential\.json/);
+  });
+
+  it("uses project icon assets for the packaged app and tray", () => {
+    const main = readFileSync(mainPath, "utf8");
+    const packageJson = readFileSync(packagePath, "utf8");
+    assert.equal(existsSync(appIconPath), true);
+    assert.equal(existsSync(macAppIconPath), true);
+    assert.equal(existsSync(trayIconPath), true);
+    assert.equal(existsSync(macTrayIconPath), true);
+    assert.equal(existsSync(macTray2xIconPath), true);
+    assert.match(main, /nativeImage\.createFromPath\(MAC_TRAY_TEMPLATE_ICON_PATH\)/);
+    assert.match(main, /nativeImage\.createFromPath\(TRAY_ICON_PATH\)/);
+    assert.match(main, /setTemplateImage\(true\)/);
+    assert.match(main, /icon: APP_ICON_PATH/);
+    assert.match(packageJson, /resources\/icons\/app\.ico/);
+    assert.match(packageJson, /resources\/icons\/app\.icns/);
   });
 });

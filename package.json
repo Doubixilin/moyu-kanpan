@@ -46,6 +46,7 @@
       "dist-electron/**",
       "config/**",
       "!config/personal.local.json",
+      "resources/icons/**",
       "LICENSE",
       "README.md",
       "package.json"
@@ -54,12 +55,14 @@
       "output": "release"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "resources/icons/app.ico"
     },
     "mac": {
       "target": "dmg",
       "category": "public.app-category.utilities",
-      "identity": "-"
+      "identity": "-",
+      "icon": "resources/icons/app.icns"
     }
   }
 }

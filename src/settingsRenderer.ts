@@ -176,7 +176,7 @@ function render(): void {
         <div class="panel-heading">
           <div>
             <h2>持仓</h2>
-            <p>只保存数量和成本；市值、盈亏由实时行情计算。</p>
+            <p>交易后请同步数量和券商成本价；当日有买卖时，今日盈亏仅供参考。</p>
           </div>
           <span>${holdingRuleSummary()}</span>
         </div>
