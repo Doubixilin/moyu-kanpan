@@ -368,6 +368,16 @@ export function toUserSettings(config: AppConfig): UserSettings {
   };
 }
 
+export function preserveRuntimeSecrets(saved: AppConfig, current: AppConfig): AppConfig {
+  return {
+    ...saved,
+    ai: {
+      ...saved.ai,
+      apiKey: current.ai.apiKey
+    }
+  };
+}
+
 export function activeSecurityCodes(
   config: Pick<AppConfig, "holdings" | "watchlist" | "tabs">
 ): string[] {
