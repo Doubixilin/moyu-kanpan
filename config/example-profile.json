@@ -1,0 +1,115 @@
+{
+  "profileVersion": 1,
+  "source": "public-example",
+  "securities": [
+    { "code": "600519", "market": "SH", "name": "贵州茅台", "alias": "" },
+    { "code": "000001", "market": "SZ", "name": "平安银行", "alias": "" },
+    { "code": "300750", "market": "SZ", "name": "宁德时代", "alias": "" },
+    { "code": "000858", "market": "SZ", "name": "五粮液", "alias": "" }
+  ],
+  "holdings": [
+    {
+      "securityCode": "600519",
+      "quantity": 100,
+      "costPrice": 1200,
+      "groupId": "all",
+      "note": "公开示例数据，不代表真实持仓",
+      "alertRules": {
+        "enabled": true,
+        "stopLossPrice": 1080,
+        "watchPrice": 1320,
+        "priceAbove": null,
+        "priceBelow": null,
+        "risePercent": 5,
+        "fallPercent": 5,
+        "dailyProfitAmount": null,
+        "dailyLossAmount": null,
+        "totalProfitAmount": null,
+        "totalLossAmount": null
+      }
+    },
+    {
+      "securityCode": "000001",
+      "quantity": 3000,
+      "costPrice": 10,
+      "groupId": "all",
+      "note": "公开示例数据，不代表真实持仓",
+      "alertRules": {
+        "enabled": true,
+        "stopLossPrice": 9,
+        "watchPrice": 11,
+        "priceAbove": null,
+        "priceBelow": null,
+        "risePercent": 5,
+        "fallPercent": 5,
+        "dailyProfitAmount": null,
+        "dailyLossAmount": null,
+        "totalProfitAmount": null,
+        "totalLossAmount": null
+      }
+    },
+    {
+      "securityCode": "300750",
+      "quantity": 100,
+      "costPrice": 300,
+      "groupId": "all",
+      "note": "公开示例数据，不代表真实持仓",
+      "alertRules": {
+        "enabled": true,
+        "stopLossPrice": 270,
+        "watchPrice": 330,
+        "priceAbove": null,
+        "priceBelow": null,
+        "risePercent": 5,
+        "fallPercent": 5,
+        "dailyProfitAmount": null,
+        "dailyLossAmount": null,
+        "totalProfitAmount": null,
+        "totalLossAmount": null
+      }
+    },
+    {
+      "securityCode": "000858",
+      "quantity": 200,
+      "costPrice": 100,
+      "groupId": "all",
+      "note": "公开示例数据，不代表真实持仓",
+      "alertRules": {
+        "enabled": true,
+        "stopLossPrice": 90,
+        "watchPrice": 110,
+        "priceAbove": null,
+        "priceBelow": null,
+        "risePercent": 5,
+        "fallPercent": 5,
+        "dailyProfitAmount": null,
+        "dailyLossAmount": null,
+        "totalProfitAmount": null,
+        "totalLossAmount": null
+      }
+    }
+  ],
+  "watchlist": [
+    { "securityCode": "600519", "visible": true, "order": 0, "groupId": "all" },
+    { "securityCode": "000001", "visible": true, "order": 1, "groupId": "all" },
+    { "securityCode": "300750", "visible": true, "order": 2, "groupId": "all" },
+    { "securityCode": "000858", "visible": true, "order": 3, "groupId": "all" }
+  ],
+  "riskGroups": [],
+  "risk": {
+    "mode": "shadow",
+    "accountBaseline": 300000,
+    "oneR": 3000,
+    "maxPositionValue": 130000,
+    "maxHoldingCount": 8,
+    "maxTotalExposurePercent": 80,
+    "portfolioDailyProfitThreshold": 6000,
+    "portfolioDailyLossThreshold": 6000,
+    "stopWarningPercent": 2,
+    "hysteresisPercent": 0.2,
+    "cooldownMinutes": 15,
+    "oncePerDay": false,
+    "onlyDuringTrading": true,
+    "notifications": { "widget": true, "tray": true, "windows": false }
+  }
+}

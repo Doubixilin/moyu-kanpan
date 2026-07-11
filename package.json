@@ -1,0 +1,56 @@
+{
+  "name": "floating-window-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discreet translucent desktop widget for A-share quotes and news alerts.",
+  "author": "Doubixilin",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module",
+  "main": "dist-electron/electron/main.js",
+  "scripts": {
+    "dev": "npm run build && electron .",
+    "dev:electron": "npm run dev",
+    "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/__tests__/*.test.ts\"",
+    "test:watch": "node --import tsx --watch --test \"src/**/*.test.ts\" \"src/**/__tests__/*.test.ts\"",
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.json && node scripts/build-renderer.mjs && tsc -p tsconfig.electron.json && node scripts/verify-electron-build.mjs",
+    "smoke:data": "npm run build && node scripts/smoke-data.mjs",
+    "smoke:news": "npm run build && node scripts/smoke-news-events.mjs",
+    "smoke:profile": "npm run build && node scripts/smoke-profile.mjs",
+    "start": "npm run build && electron .",
+    "clean:release": "node scripts/clean-release.mjs",
+    "package:win": "npm run clean:release && npm run build && electron-builder --win --x64 --publish never && node scripts/verify-packaged-app.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "iconv-lite": "^0.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.2",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "dev.polaris.floatingStockWidget",
+    "productName": "摸鱼看盘",
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "config/**",
+      "!config/personal.local.json",
+      "LICENSE",
+      "README.md",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

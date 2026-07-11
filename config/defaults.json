@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 8,
+  "securities": [
+    { "code": "000001", "market": "SZ", "name": "", "alias": "" },
+    { "code": "600519", "market": "SH", "name": "", "alias": "" },
+    { "code": "300750", "market": "SZ", "name": "", "alias": "" },
+    { "code": "000858", "market": "SZ", "name": "", "alias": "" }
+  ],
+  "holdings": [],
+  "watchlist": [
+    { "securityCode": "000001", "visible": true, "order": 0, "groupId": "all" },
+    { "securityCode": "600519", "visible": true, "order": 1, "groupId": "all" },
+    { "securityCode": "300750", "visible": true, "order": 2, "groupId": "all" },
+    { "securityCode": "000858", "visible": true, "order": 3, "groupId": "all" }
+  ],
+  "navigation": {
+    "defaultTabId": "watchlist",
+    "rememberLastTab": false,
+    "lastActiveTabId": "watchlist"
+  },
+  "quotes": {
+    "fields": ["price", "changePercent"],
+    "sort": "manual"
+  },
+  "news": {
+    "mode": "all",
+    "maxItems": 5
+  },
+  "appearance": {
+    "theme": "standard",
+    "backgroundOpacity": 0.82
+  },
+  "ai": {
+    "enabled": true,
+    "provider": "deepseek",
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-v4-flash",
+    "timeoutSeconds": 20
+  },
+  "risk": {
+    "mode": "shadow",
+    "accountBaseline": null,
+    "oneR": null,
+    "maxPositionValue": null,
+    "maxHoldingCount": null,
+    "maxTotalExposurePercent": null,
+    "portfolioDailyProfitThreshold": null,
+    "portfolioDailyLossThreshold": null,
+    "stopWarningPercent": 2,
+    "hysteresisPercent": 0.2,
+    "cooldownMinutes": 15,
+    "oncePerDay": false,
+    "onlyDuringTrading": true,
+    "notifications": {
+      "widget": true,
+      "tray": true,
+      "windows": false
+    },
+    "groups": []
+  },
+  "pollIntervals": {
+    "quotesMs": 8000,
+    "newsMs": 60000
+  },
+  "providers": {
+    "quote": "eastmoney",
+    "news": "eastmoney"
+  },
+  "window": {
+    "width": 380,
+    "height": 520,
+    "x": null,
+    "y": null,
+    "alwaysOnTop": true,
+    "trayOnly": true,
+    "bossKeyEnabled": true,
+    "bossKeyAccelerator": "CommandOrControl+Alt+Space",
+    "clickThrough": false,
+    "locked": false
+  }
+}

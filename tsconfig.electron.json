@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "dist-electron",
+    "rootDir": ".",
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": ["electron", "src/domain", "src/providers", "src/services", "src/ai", "src/settings", "src/config.ts", "src/global.d.ts"],
+  "exclude": ["src/**/__tests__/**", "src/**/*.test.ts"]
+}
