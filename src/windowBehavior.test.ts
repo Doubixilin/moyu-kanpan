@@ -22,8 +22,14 @@ describe("boss key window safety", () => {
     assert.match(persist, /isFullScreen\(\)/);
   });
 
+  it("lets the first real snapshot restore the configured active tab", async () => {
+    const renderer = await readFile(path.join(process.cwd(), "src", "renderer.ts"), "utf8");
+    assert.match(renderer, /render\(emptySnapshot\);\s*navigationInitialized = false;/);
+  });
+
   it("keeps macOS Dock, tray template image and floating level platform-aware", async () => {
     const main = await readFile(path.join(process.cwd(), "electron", "main.ts"), "utf8");
+    assert.match(main, /app\.setName\("摸鱼看盘"\)/);
     assert.match(main, /process\.platform === "darwin" \? "floating" : "screen-saver"/);
     assert.match(main, /app\.dock\.hide\(\)/);
     assert.match(main, /app\.dock\.show\(\)/);
@@ -46,8 +52,10 @@ describe("boss key window safety", () => {
       await readFile(path.join(process.cwd(), "package.json"), "utf8")
     ) as {
       scripts: Record<string, string>;
+      productName: string;
       build: { win: { target: string }; mac: { target: string; identity: string } };
     };
+    assert.equal(packageJson.productName, "摸鱼看盘");
     assert.match(packageJson.scripts["package:win"] ?? "", /--win --x64/);
     assert.match(packageJson.scripts["package:mac"] ?? "", /package-mac\.mjs/);
     assert.equal(packageJson.build.win.target, "nsis");

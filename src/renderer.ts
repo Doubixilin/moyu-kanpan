@@ -1039,6 +1039,7 @@ window.addEventListener("online", () => {
   void window.floatingStock?.notifyOnline();
 });
 render(emptySnapshot);
+navigationInitialized = false;
 
 function renderRecentAlert(next: AppSnapshot): string {
   const event = next.risk.recentEvents[0];

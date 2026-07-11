@@ -181,6 +181,7 @@ let alertStateStore: JsonAlertStateStore;
 let lastAlertStateSaveAt = 0;
 const quoteCoordinator = new QuoteCoordinator();
 
+app.setName("摸鱼看盘");
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
 

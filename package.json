@@ -1,5 +1,6 @@
 {
   "name": "floating-window-app",
+  "productName": "摸鱼看盘",
   "version": "0.1.0",
   "private": true,
   "description": "Discreet translucent desktop widget for A-share quotes and news alerts.",
