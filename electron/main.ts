@@ -366,7 +366,13 @@ function createExcelWindow(): BrowserWindow {
     minWidth: Math.min(900, bounds.width),
     minHeight: Math.min(560, bounds.height),
     show: false,
-    frame: false,
+    ...(process.platform === "darwin"
+      ? {
+          frame: true,
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 13, y: 11 }
+        }
+      : { frame: false }),
     transparent: false,
     resizable: true,
     movable: true,

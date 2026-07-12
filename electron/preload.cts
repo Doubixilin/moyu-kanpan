@@ -10,6 +10,7 @@ import type { FloatingStockApi } from "../src/global.js";
 import type { ProfileImportMode, ProfilePreview } from "../src/settings/profile.js";
 
 const api: FloatingStockApi = {
+  platform: process.platform,
   notifyOnline: () => ipcRenderer.invoke("app:online") as Promise<void>,
   getSnapshot: () => ipcRenderer.invoke("snapshot:get") as Promise<AppSnapshot>,
   getMarketDetail: (instrument: MarketInstrumentRequest) =>

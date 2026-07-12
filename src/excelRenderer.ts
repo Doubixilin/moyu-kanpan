@@ -67,6 +67,7 @@ sheets = withUtilitySheets(sheets);
 const root = document.querySelector<HTMLDivElement>("#excel-root");
 if (!root) throw new Error("Missing excel root");
 const rootElement = root;
+document.documentElement.dataset.platform = window.floatingStock?.platform ?? "unknown";
 let activeRibbon: RibbonTab = "home";
 let activeSheetIndex = 0;
 let selectedRow = 4;

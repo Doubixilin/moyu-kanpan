@@ -31,6 +31,7 @@ describe("settings renderer build contract", () => {
     const root = process.cwd();
     const entry = await readFile(path.join(root, "src", "excelRenderer.ts"), "utf8");
     const styles = await readFile(path.join(root, "src", "excel.css"), "utf8");
+    const preload = await readFile(path.join(root, "electron", "preload.cts"), "utf8");
     const builder = await readFile(path.join(root, "scripts", "build-renderer.mjs"), "utf8");
     const main = await readFile(path.join(root, "electron", "main.ts"), "utf8");
 
@@ -44,6 +45,10 @@ describe("settings renderer build contract", () => {
     assert.match(styles, /\.sheet-grid/);
     assert.match(styles, /-apple-system/);
     assert.match(styles, /-webkit-app-region:\s*drag/);
+    assert.match(preload, /platform:\s*process\.platform/);
+    assert.match(entry, /dataset\.platform = window\.floatingStock\?\.platform/);
+    assert.match(styles, /data-platform="darwin"/);
+    assert.match(styles, /\.window-controls,\s*\n:root\[data-platform="darwin"\] \.file-tab \{ display: none; \}/);
     assert.doesNotMatch(entry, /xlsx|formulaEngine|spreadsheet/i);
   });
 

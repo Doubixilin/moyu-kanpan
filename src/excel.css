@@ -25,6 +25,16 @@ button { color: inherit; }
 .window-controls { height: 100%; display: grid; grid-template-columns: repeat(3, 46px); }
 .window-controls .close:hover { background: #c42b1c; }
 
+:root[data-platform="darwin"] .excel-app { border: 0; }
+:root[data-platform="darwin"] .titlebar {
+  grid-template-columns: 166px minmax(240px, 1fr) minmax(180px, 300px) 44px;
+  padding-right: 8px;
+}
+:root[data-platform="darwin"] .quick-access { padding-left: 78px; }
+:root[data-platform="darwin"] .title-search { justify-self: stretch; }
+:root[data-platform="darwin"] .window-controls,
+:root[data-platform="darwin"] .file-tab { display: none; }
+
 .ribbon-tabs { height: 32px; display: flex; align-items: stretch; background: #f8f8f8; border-bottom: 1px solid #d0d0d0; user-select: none; }
 .ribbon-tabs button { min-width: 54px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: default; }
 .ribbon-tabs button:hover { background: #e8f1eb; }

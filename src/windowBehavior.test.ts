@@ -83,6 +83,10 @@ describe("boss key window safety", () => {
     assert.match(excelWindow, /getDisplayNearestPoint\(screen\.getCursorScreenPoint\(\)\)/);
     assert.match(excelWindow, /ensureVisibleWindowBounds/);
     assert.match(excelWindow, /fullscreenable:\s*false/);
+    assert.match(excelWindow, /process\.platform === "darwin"/);
+    assert.match(excelWindow, /titleBarStyle:\s*"hiddenInset"/);
+    assert.match(excelWindow, /trafficLightPosition:\s*\{ x: 13, y: 11 \}/);
+    assert.match(excelWindow, /:\s*\{ frame: false \}/);
   });
 
   it("packages the current macOS architecture as an app and DMG without replacing Windows", async () => {

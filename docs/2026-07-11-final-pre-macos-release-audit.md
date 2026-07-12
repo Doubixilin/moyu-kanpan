@@ -223,7 +223,7 @@ macOS 分支已无损合入远程 `main` 的 `a0c5ebcea127b0add1912bbada5d61955f
 
 - 动态托盘状态在 Windows 继续使用彩色状态图标；macOS 始终返回单色 `trayTemplate.png` 并调用 `setTemplateImage(true)`，避免状态刷新后退化为带底色图标。
 - 菜单栏速览窗在 macOS 使用 floating 置顶层级并隐藏于 Mission Control；按菜单栏所在显示器 work area 定位，不改变 Windows 的任务栏边缘算法。
-- Excel 外观工作台按当前显示器安全区域居中并限制最小尺寸，继续禁止全屏；标题栏拖动、最小化、最大化、关闭、表格滚动和实时数据均在 macOS 实机可用。
+- Excel 外观工作台按当前显示器安全区域居中并限制最小尺寸，继续禁止全屏；macOS 使用 `hiddenInset` 原生交通灯、隐藏右侧 Windows 窗口按钮和“文件”Ribbon 标签，Windows 继续保留原外观。标题栏拖动、原生关闭隐藏、表格滚动和实时数据均在 macOS 实机可用。
 - Excel、速览和本地工作网页增加 `-apple-system` / `BlinkMacSystemFont` 回退，Windows 仍继续使用 Segoe UI。
 - 回环工作网页只监听 `127.0.0.1`，Host、Origin、随机 token、HttpOnly SameSite Cookie 和严格 CSP 校验保持有效；Electron `shell.openExternal()` 已在 macOS 实际调用 Safari 成功打开随机端口页面。应用退出后监听端口关闭。
 - 退出前窗口位置保存继续使用 `preserveRuntimeSecrets()`，避免新关闭路径再次覆盖安全存储中的运行时 API Key。

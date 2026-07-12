@@ -14,6 +14,7 @@ export interface ProfileApplyResult {
 }
 
 export interface FloatingStockApi {
+  platform: NodeJS.Platform;
   notifyOnline: () => Promise<void>;
   getSnapshot: () => Promise<AppSnapshot>;
   getMarketDetail: (instrument: MarketInstrumentRequest) => Promise<MarketDetail>;
