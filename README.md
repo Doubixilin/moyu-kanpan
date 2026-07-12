@@ -18,6 +18,8 @@
 - 支持一键复制脱敏事件上下文供 Coze 深度核验，不包含账户和仓位私密数据
 - 无 API Key 时使用本地规则分析，避免功能空白
 - 托盘菜单及全局快捷键支持显示/隐藏和点击穿透恢复
+- 菜单栏速览提供指数、自选和最近事件的轻量视图
+- 提供独立的 Excel 外观工作台，以及仅监听本机回环地址的项目工作网页
 - macOS 仅托盘驻留时同步隐藏 Dock，菜单栏使用鱼形行情 Logo 的单色 Template Image
 - Windows NSIS 与 macOS DMG 均使用 `electron-builder` 独立打包
 
@@ -105,6 +107,8 @@ Windows 打包需要能下载 Electron 和 electron-builder 相关二进制。�
 ## macOS 开发与打包
 
 macOS 开发命令与上面的通用开发流程相同。`npm start` 会构建后启动 Electron；默认“仅托盘驻留”会隐藏 Dock 图标，仍可通过菜单栏图标和全局老板键显示或隐藏主窗口。
+
+菜单栏可打开速览、Excel 外观工作台和项目工作网页。工作网页服务只监听 `127.0.0.1`，由 Electron 通过系统默认浏览器打开；停止应用时会同步关闭回环服务。
 
 在 Intel 或 Apple Silicon Mac 上运行：
 

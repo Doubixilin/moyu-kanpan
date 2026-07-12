@@ -47,12 +47,14 @@ import {
   instrumentKey
 } from "../src/domain/market.js";
 import { aggregateNewsSource } from "../src/domain/news.js";
+import { buildTrayPresentation, type TrayVisualState } from "../src/domain/trayStatus.js";
 import {
   buildAlertCandidates,
   calculateRiskSnapshot,
   emptyRiskSnapshot
 } from "../src/domain/risk.js";
 import { ensureVisibleWindowBounds } from "../src/domain/windowBounds.js";
+import { quickWindowBounds } from "../src/domain/quickWindowBounds.js";
 import {
   isSecureApiBaseUrl,
   isTrustedRendererUrl,
@@ -60,9 +62,14 @@ import {
 } from "../src/domain/runtimeSecurity.js";
 import {
   getAShareMarketState,
-  isAShareTradingSession,
-  quotePollDelayMs
+  isAShareTradingSession
 } from "../src/domain/marketClock.js";
+import {
+  FAST_INDEX_INTERVAL_MS,
+  IDLE_QUOTE_INTERVAL_MS,
+  quoteTargetIntervalMs,
+  startToStartDelayMs
+} from "../src/domain/refreshPolicy.js";
 import {
   buildFeedStatus,
   isQuoteFeedStalled,
@@ -90,6 +97,8 @@ import {
 } from "../src/services/newsEvents.js";
 import { QuoteCoordinator } from "../src/services/quotes.js";
 import { createSingleFlight } from "../src/services/singleFlight.js";
+import { LocalWorkWebServer } from "../src/services/localWeb.js";
+import { buildPublicSnapshot, buildPublicTrend } from "../src/presentation/publicSnapshot.js";
 import { SettingsStore, settingsForRenderer } from "../src/settings/store.js";
 import { DEFAULT_BOSS_KEY_ACCELERATOR } from "../src/shortcut.js";
 import {
@@ -102,7 +111,15 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MAIN_RENDERER_PATH = path.join(__dirname, "../../dist/index.html");
 const SETTINGS_RENDERER_PATH = path.join(__dirname, "../../dist/settings.html");
-const LOCAL_RENDERER_URLS = [MAIN_RENDERER_PATH, SETTINGS_RENDERER_PATH]
+const QUICK_RENDERER_PATH = path.join(__dirname, "../../dist/quick.html");
+const EXCEL_RENDERER_PATH = path.join(__dirname, "../../dist/excel.html");
+const WORK_WEB_ROOT = path.join(__dirname, "../../dist");
+const LOCAL_RENDERER_URLS = [
+  MAIN_RENDERER_PATH,
+  SETTINGS_RENDERER_PATH,
+  QUICK_RENDERER_PATH,
+  EXCEL_RENDERER_PATH
+]
   .map((entry) => pathToFileURL(entry).toString());
 const ALLOWED_ENV_KEYS = ["AI_API_KEY", "AI_API_BASE_URL", "AI_MODEL"] as const;
 const APP_ICON_PATH = path.join(__dirname, "../../resources/icons/app-256.png");
@@ -122,7 +139,13 @@ let config: AppConfig;
 let settingsStore: SettingsStore;
 let mainWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
+let quickWindow: BrowserWindow | null = null;
+let excelWindow: BrowserWindow | null = null;
+let localWorkWeb: LocalWorkWebServer | null = null;
+let localWorkWebVisibleClients = 0;
 let tray: Tray | null = null;
+let trayVisualState: TrayVisualState | null = null;
+let trayPresentationFingerprint = "";
 let newsAnalyzer: CachedNewsAnalyzer;
 let aiCredentialStore: EncryptedApiKeyStore;
 let aiCredentialSource: AiRuntimeStatus["credentialSource"] = "none";
@@ -140,9 +163,11 @@ let aiStatus: AiRuntimeStatus = {
   message: "未配置 API Key，使用本地规则"
 };
 let quotePollTimer: NodeJS.Timeout | null = null;
+let fastIndexPollTimer: NodeJS.Timeout | null = null;
 let marketPollTimer: NodeJS.Timeout | null = null;
 let newsPollTimer: NodeJS.Timeout | null = null;
 let refreshQuotesNow: (() => Promise<void>) | null = null;
+let refreshFastIndicesNow: (() => Promise<void>) | null = null;
 let refreshMarketNow: (() => Promise<void>) | null = null;
 let refreshNewsNow: (() => Promise<void>) | null = null;
 let latestQuotes: Quote[] = [];
@@ -165,6 +190,8 @@ let quotesSource: DataSource | null = null;
 let quotesDataUpdatedAt: string | null = null;
 let quotesLastChangedAt: string | null = null;
 let latestQuoteFingerprint: string | null = null;
+let lastQuoteDeliveryFingerprint = "";
+let lastQuoteDeliveryAt = 0;
 let quotesCoverage: number | null = null;
 let quotesDegraded = false;
 let quotesConflictCount = 0;
@@ -223,6 +250,7 @@ function createWindow(): BrowserWindow {
   );
   const window = new BrowserWindow({
     ...bounds,
+    show: false,
     transparent: true,
     frame: false,
     resizable: !config.window.locked,
@@ -275,6 +303,122 @@ function createWindow(): BrowserWindow {
     if (mainWindow === window) mainWindow = null;
   });
   return window;
+}
+
+function createQuickWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 320,
+    height: 380,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hiddenInMissionControl: process.platform === "darwin",
+    icon: APP_ICON_PATH,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true
+    }
+  });
+  hardenRendererWindow(window);
+  setWindowAlwaysOnTop(window, true);
+  if (devServerUrl) {
+    void window.loadURL(new URL("quick.html", devServerUrl).toString());
+  } else {
+    void window.loadFile(QUICK_RENDERER_PATH);
+  }
+  window.webContents.on("did-finish-load", () => {
+    if (!window.isDestroyed()) window.webContents.send("snapshot:update", snapshot());
+  });
+  window.on("blur", () => {
+    if (!window.webContents.isDevToolsOpened()) window.hide();
+  });
+  window.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    window.hide();
+  });
+  window.on("closed", () => {
+    if (quickWindow === window) quickWindow = null;
+  });
+  return window;
+}
+
+function createExcelWindow(): BrowserWindow {
+  const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const bounds = ensureVisibleWindowBounds(
+    { width: 1180, height: 760, x: null, y: null },
+    [workArea],
+    workArea
+  );
+  const window = new BrowserWindow({
+    ...bounds,
+    minWidth: Math.min(900, bounds.width),
+    minHeight: Math.min(560, bounds.height),
+    show: false,
+    frame: false,
+    transparent: false,
+    resizable: true,
+    movable: true,
+    maximizable: true,
+    minimizable: true,
+    fullscreenable: false,
+    alwaysOnTop: false,
+    skipTaskbar: false,
+    title: "月度工作台 - 数据表",
+    icon: APP_ICON_PATH,
+    backgroundColor: "#f3f3f3",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true
+    }
+  });
+  hardenRendererWindow(window);
+  if (devServerUrl) {
+    void window.loadURL(new URL("excel.html", devServerUrl).toString());
+  } else {
+    void window.loadFile(EXCEL_RENDERER_PATH);
+  }
+  window.webContents.on("did-finish-load", () => {
+    if (!window.isDestroyed()) window.webContents.send("snapshot:update", snapshot());
+  });
+  window.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    window.hide();
+  });
+  window.on("closed", () => {
+    if (excelWindow === window) excelWindow = null;
+  });
+  return window;
+}
+
+function openExcelWorkspace(): void {
+  if (!excelWindow || excelWindow.isDestroyed()) excelWindow = createExcelWindow();
+  if (excelWindow.isMinimized()) excelWindow.restore();
+  excelWindow.show();
+  excelWindow.moveTop();
+  excelWindow.focus();
+  void refreshQuotesNow?.();
+  void refreshFastIndices();
+}
+
+async function openLocalWorkWeb(): Promise<void> {
+  if (!localWorkWeb) return;
+  await shell.openExternal(localWorkWeb.url);
 }
 function openSettingsWindow(): void {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
@@ -360,25 +504,49 @@ function createTray(): void {
 
   tray = new Tray(icon);
   tray.setToolTip("摸鱼看盘");
-  tray.on("click", () => toggleWindow(false));
+  tray.on("click", () => toggleQuickView());
   updateTrayMenu();
 }
 
 function updateTrayMenu(): void {
+  if (!tray || !config) return;
   const bossKeyLabel = showHideShortcut ||
     (config.window.bossKeyEnabled ? "注册失败" : "未启用");
   const latestAlert = latestRisk.recentEvents[0];
   const alertMode = config.risk.mode === "shadow" ? "影子模式" : "正式提醒";
-  tray?.setToolTip(
-    latestRisk.paused
-      ? "摸鱼看盘 · 提醒已暂停"
-      : config.risk.mode === "active" && config.risk.notifications.tray && latestAlert
-        ? `提醒：${latestAlert.title}`
-        : "摸鱼看盘"
-  );
-  tray?.setContextMenu(
+  const presentation = buildTrayPresentation(snapshot());
+  const tooltip = latestRisk.paused
+    ? `${presentation.tooltip}｜提醒已暂停`
+    : config.risk.mode === "active" && config.risk.notifications.tray && latestAlert
+      ? `${presentation.tooltip}｜提醒：${latestAlert.title}`
+      : presentation.tooltip;
+  const fingerprint = JSON.stringify({
+    tooltip,
+    quoteLabels: presentation.quoteLabels,
+    latestAlert: latestAlert?.id,
+    alertMode,
+    paused: latestRisk.paused,
+    bossKeyLabel,
+    window: config.window,
+    tabs: config.tabs.map((tab) => [tab.id, tab.title, tab.visible, tab.order]),
+    theme: config.appearance.theme,
+    clickThrough
+  });
+  if (presentation.state !== trayVisualState) {
+    tray.setImage(createTrayStateIcon(presentation.state));
+    trayVisualState = presentation.state;
+  }
+  tray.setToolTip(tooltip.slice(0, 120));
+  if (fingerprint === trayPresentationFingerprint) return;
+  trayPresentationFingerprint = fingerprint;
+  tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "显示/隐藏（" + bossKeyLabel + "）", click: () => toggleWindow(false) },
+      { label: "显示速览", click: () => toggleQuickView() },
+      { label: "显示完整窗口（" + bossKeyLabel + "）", click: () => revealMainWindow() },
+      { label: "打开月度工作台", click: () => openExcelWorkspace() },
+      { label: "打开项目工作网页", click: () => void openLocalWorkWeb() },
+      ...presentation.quoteLabels.map((label) => ({ label, enabled: false })),
+      ...(presentation.quoteLabels.length > 0 ? [{ type: "separator" as const }] : []),
       { label: "设置…", click: () => openSettingsWindow() },
       { label: `提醒：${alertMode}${latestRisk.paused ? " · 已暂停" : ""}`, enabled: false },
       ...(latestAlert ? [{ label: `最近：${latestAlert.title}`, enabled: false }] : []),
@@ -434,6 +602,29 @@ function updateTrayMenu(): void {
       { label: "退出", click: () => app.quit() }
     ])
   );
+}
+
+function createTrayStateIcon(state: TrayVisualState): Electron.NativeImage {
+  if (process.platform === "darwin") {
+    const template = nativeImage.createFromPath(MAC_TRAY_TEMPLATE_ICON_PATH);
+    if (template.isEmpty()) throw new Error("Failed to create macOS tray template icon");
+    template.setTemplateImage(true);
+    return template;
+  }
+  const colors: Record<TrayVisualState, string> = {
+    neutral: "#64748b",
+    up: "#c2413b",
+    down: "#2f855a",
+    attention: "#d38b16",
+    degraded: "#7c3aed"
+  };
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="3" fill="${colors[state]}"/><path d="M4 10.5h2V7H4zm3 0h2V4.5H7zm3 0h2V6h-2z" fill="white" opacity=".92"/></svg>`;
+  const dynamic = nativeImage.createFromDataURL(
+    `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
+  ).resize({ width: 16, height: 16, quality: "best" });
+  return dynamic.isEmpty()
+    ? nativeImage.createFromPath(TRAY_ICON_PATH).resize({ width: 16, height: 16 })
+    : dynamic;
 }
 
 function registerGlobalShortcuts(): void {
@@ -602,24 +793,58 @@ function handleTrusted(
     return listener(event, ...args);
   });
 }
-function scheduleQuoteRefresh(): void {
+function quoteSurfaceIsForeground(): boolean {
+  return Boolean(
+    mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() ||
+    quickWindow && !quickWindow.isDestroyed() && quickWindow.isVisible() ||
+    excelWindow && !excelWindow.isDestroyed() && excelWindow.isVisible() ||
+    localWorkWebVisibleClients > 0
+  );
+}
+
+function scheduleQuoteRefresh(startedAtMs: number): void {
   if (isQuitting) return;
   if (quotePollTimer) clearTimeout(quotePollTimer);
-  const delay = quotePollDelayMs(new Date(), config.pollIntervals.quotesMs);
-  quotePollTimer = setTimeout(async () => {
-    try {
-      await refreshQuotesNow?.();
-    } finally {
-      scheduleQuoteRefresh();
-    }
-  }, delay);
+  const now = new Date();
+  const target = quoteTargetIntervalMs({
+    marketState: getAShareMarketState(now),
+    foreground: quoteSurfaceIsForeground(),
+    mode: config.refreshPolicy.mode
+  });
+  const delay = startToStartDelayMs(target, Date.now() - startedAtMs);
+  quotePollTimer = setTimeout(runQuoteRefresh, delay);
+}
+
+function runQuoteRefresh(): void {
+  if (isQuitting || !refreshQuotesNow) return;
+  if (quotePollTimer) clearTimeout(quotePollTimer);
+  const startedAtMs = Date.now();
+  void refreshQuotesNow().finally(() => scheduleQuoteRefresh(startedAtMs));
+}
+
+function scheduleFastIndexRefresh(startedAtMs: number): void {
+  if (isQuitting) return;
+  if (fastIndexPollTimer) clearTimeout(fastIndexPollTimer);
+  const target = isAShareTradingSession(new Date())
+    ? FAST_INDEX_INTERVAL_MS
+    : IDLE_QUOTE_INTERVAL_MS;
+  const delay = startToStartDelayMs(target, Date.now() - startedAtMs);
+  fastIndexPollTimer = setTimeout(runFastIndexRefresh, delay);
+}
+
+function runFastIndexRefresh(): void {
+  if (isQuitting || !refreshFastIndicesNow) return;
+  if (fastIndexPollTimer) clearTimeout(fastIndexPollTimer);
+  const startedAtMs = Date.now();
+  void refreshFastIndicesNow().finally(() => scheduleFastIndexRefresh(startedAtMs));
 }
 
 function scheduleMarketRefresh(): void {
   if (isQuitting) return;
   if (marketPollTimer) clearTimeout(marketPollTimer);
-  const activeInterval = Math.max(config.pollIntervals.quotesMs * 2, 15_000);
-  const delay = quotePollDelayMs(new Date(), activeInterval);
+  const activeInterval = Math.max(config.pollIntervals.quotesMs * 3, 15_000);
+  const target = isAShareTradingSession(new Date()) ? activeInterval : 60_000;
+  const delay = startToStartDelayMs(target, 0);
   marketPollTimer = setTimeout(async () => {
     try {
       await refreshMarketNow?.();
@@ -630,7 +855,8 @@ function scheduleMarketRefresh(): void {
 }
 
 function refreshAfterConnectivityChange(): void {
-  void refreshQuotesNow?.();
+  runQuoteRefresh();
+  runFastIndexRefresh();
   void refreshMarketNow?.();
   void refreshNewsNow?.();
 }
@@ -691,7 +917,78 @@ async function refreshQuotes(): Promise<void> {
     latestErrors = upsertError(latestErrors, `quotes:${errorMessage(error)}`);
   }
   await refreshRisk(evaluationTime);
+  pushQuoteSnapshotIfNeeded();
+}
+
+function pushQuoteSnapshotIfNeeded(): void {
+  const fingerprint = JSON.stringify({
+    quotes: latestQuoteFingerprint,
+    source: quotesSource,
+    coverage: quotesCoverage,
+    degraded: quotesDegraded,
+    conflictCount: quotesConflictCount,
+    retainedCount: quotesRetainedCount,
+    missingCount: quotesMissingCount,
+    alertSafe: quotesAlertSafe,
+    failed: quotesLastAttemptFailed,
+    errors: latestErrors.filter((error) => error.startsWith("quotes:")),
+    riskSafe: latestRisk.dataSafe,
+    latestAlert: latestRisk.recentEvents.at(-1)?.id ?? null
+  });
+  const nowMs = Date.now();
+  if (fingerprint === lastQuoteDeliveryFingerprint && nowMs - lastQuoteDeliveryAt < 15_000) {
+    return;
+  }
+  lastQuoteDeliveryFingerprint = fingerprint;
+  lastQuoteDeliveryAt = nowMs;
   pushSnapshot();
+}
+
+async function refreshFastIndices(): Promise<void> {
+  const now = new Date();
+  try {
+    const result = await marketDataCoordinator.fetchFastIndices(config.providers.quote, {
+      marketOpen: isAShareTradingSession(now),
+      nowMs: now.getTime(),
+      maxSourceAgeMs: Math.max(FAST_INDEX_INTERVAL_MS * 12, 60_000)
+    });
+    if (result.items.length === 0) return;
+    const previous = JSON.stringify(latestMarket.indices);
+    latestMarket = {
+      ...latestMarket,
+      indices: result.items,
+      source: result.source ?? latestMarket.source,
+      updatedAt: newestQuoteTimestamp(result.items.map((item) => ({
+        code: item.instrument.code,
+        name: item.instrument.name,
+        market: item.instrument.market,
+        price: item.price,
+        change: item.change,
+        changePercent: item.changePercent,
+        open: null,
+        previousClose: null,
+        high: null,
+        low: null,
+        volume: null,
+        amount: item.amount,
+        source: item.source,
+        updatedAt: item.updatedAt ?? undefined
+      }))) ?? latestMarket.updatedAt,
+      errors: [
+        ...latestMarket.errors.filter((error) => !error.startsWith("indices:")),
+        ...result.errors.map((error) => `indices:${error}`)
+      ]
+    };
+    if (JSON.stringify(latestMarket.indices) !== previous) pushSnapshot();
+  } catch (error) {
+    latestMarket = {
+      ...latestMarket,
+      errors: [
+        ...latestMarket.errors.filter((entry) => !entry.startsWith("indices:")),
+        `indices:${errorMessage(error)}`
+      ]
+    };
+  }
 }
 
 async function refreshRisk(now: Date): Promise<void> {
@@ -1185,9 +1482,17 @@ function snapshot(): AppSnapshot {
 }
 
 function pushSnapshot(): void {
+  updateTrayMenu();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("snapshot:update", snapshot());
   }
+  if (quickWindow && !quickWindow.isDestroyed()) {
+    quickWindow.webContents.send("snapshot:update", snapshot());
+  }
+  if (excelWindow && !excelWindow.isDestroyed()) {
+    excelWindow.webContents.send("snapshot:update", snapshot());
+  }
+  localWorkWeb?.broadcast(buildPublicSnapshot(snapshot()));
 }
 
 function pushSettings(): void {
@@ -1222,6 +1527,21 @@ function registerIpc(): void {
   );
   handleTrusted("settings:open", () => openSettingsWindow());
   handleTrusted("window:hide", () => hideMainWindow());
+  handleTrusted("window:showFull", () => {
+    quickWindow?.hide();
+    revealMainWindow();
+  });
+  handleTrusted("quick:hide", () => quickWindow?.hide());
+  handleTrusted("excel:open", () => openExcelWorkspace());
+  handleTrusted("excel:windowAction", (_event, action: unknown) => {
+    if (!excelWindow || excelWindow.isDestroyed()) return;
+    if (action === "minimize") excelWindow.minimize();
+    if (action === "maximize") {
+      if (excelWindow.isMaximized()) excelWindow.unmaximize();
+      else excelWindow.maximize();
+    }
+    if (action === "close") excelWindow.hide();
+  });
   handleTrusted("appearance:setBackgroundOpacity", async (_event, opacity: number) => {
     const next = toUserSettings(config);
     next.appearance.backgroundOpacity = opacity;
@@ -1444,10 +1764,32 @@ function hideMainWindow(): void {
   syncMacDockVisibility();
 }
 
+function toggleQuickView(): void {
+  if (!quickWindow || quickWindow.isDestroyed()) quickWindow = createQuickWindow();
+  if (quickWindow.isVisible()) {
+    quickWindow.hide();
+    return;
+  }
+  const trayBounds = tray?.getBounds();
+  if (!trayBounds) return;
+  const display = screen.getDisplayNearestPoint({
+    x: trayBounds.x + Math.round(trayBounds.width / 2),
+    y: trayBounds.y + Math.round(trayBounds.height / 2)
+  });
+  quickWindow.setBounds(quickWindowBounds(trayBounds, display.workArea, {
+    width: 320,
+    height: 380
+  }), false);
+  quickWindow.show();
+  quickWindow.focus();
+  runQuoteRefresh();
+  runFastIndexRefresh();
+}
+
 function toggleWindow(fromBossKey: boolean): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
     mainWindow = createWindow();
-    syncMacDockVisibility();
+    revealMainWindow();
     return;
   }
 
@@ -1475,6 +1817,8 @@ function revealMainWindow(): void {
   mainWindow.moveTop();
   if (!clickThrough) mainWindow.focus();
   syncMacDockVisibility();
+  runQuoteRefresh();
+  runFastIndexRefresh();
 }
 
 async function persistWindowBoundsForShutdown(): Promise<void> {
@@ -1486,7 +1830,7 @@ async function persistWindowBoundsForShutdown(): Promise<void> {
       config.window.width === bounds.width && config.window.height === bounds.height) return;
   const next = toUserSettings(config);
   next.window = { ...next.window, ...bounds };
-  config = await settingsStore.save(next);
+  config = preserveRuntimeSecrets(await settingsStore.save(next), config);
 }
 
 function recoverNormalWindowState(window: BrowserWindow): void {
@@ -1532,6 +1876,11 @@ function upsertError(errors: string[], next: string): string[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parsePreviewPort(value: string | undefined): number {
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1024 && port <= 65_535 ? port : 0;
 }
 
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
@@ -1590,20 +1939,59 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   }
   newsDataCoordinator = new NewsDataCoordinator(newsEventStore);
 
+  localWorkWeb = new LocalWorkWebServer({
+    assetRoot: WORK_WEB_ROOT,
+    snapshot: () => buildPublicSnapshot(snapshot()),
+    trend: async (code) => {
+      const visible = config.watchlist.some((item) => item.visible && item.securityCode === code);
+      const security = config.securities.find((item) => item.code === code);
+      if (!visible || !security) return null;
+      const now = new Date();
+      const detail = await marketDataCoordinator.fetchDetail(
+        resolveMarketInstrument({ kind: "stock", market: security.market, code }),
+        config.providers.quote,
+        {
+          marketOpen: isAShareTradingSession(now),
+          nowMs: now.getTime(),
+          maxSourceAgeMs: Math.max(config.pollIntervals.quotesMs * 10, 180_000)
+        }
+      );
+      return buildPublicTrend(detail);
+    },
+    token: !app.isPackaged ? process.env.MOYU_WEB_PREVIEW_TOKEN : undefined,
+    onVisibleClientsChange: (count) => {
+      const becameVisible = localWorkWebVisibleClients === 0 && count > 0;
+      localWorkWebVisibleClients = count;
+      if (becameVisible) {
+        void refreshQuotesNow?.();
+        void refreshFastIndicesNow?.();
+      }
+    }
+  });
+  await localWorkWeb.start(!app.isPackaged ? parsePreviewPort(process.env.MOYU_WEB_PREVIEW_PORT) : 0);
+
   registerIpc();
   mainWindow = createWindow();
   createTray();
   applyWindowPreferences();
+  quickWindow = createQuickWindow();
+  if (!app.isPackaged &&
+      (process.env.MOYU_EXCEL_PREVIEW === "1" || process.argv.includes("--excel-preview"))) {
+    openExcelWorkspace();
+  }
   registerGlobalShortcuts();
   powerMonitor.on("resume", refreshAfterConnectivityChange);
 
   refreshQuotesNow = createSingleFlight(refreshQuotes);
+  refreshFastIndicesNow = createSingleFlight(refreshFastIndices);
   refreshMarketNow = createSingleFlight(refreshMarket);
   refreshNewsNow = createSingleFlight(refreshNews);
-  void refreshQuotesNow().finally(scheduleQuoteRefresh);
+  runQuoteRefresh();
+  runFastIndexRefresh();
   void refreshMarketNow().finally(scheduleMarketRefresh);
   void refreshNewsNow();
   newsPollTimer = setInterval(() => void refreshNewsNow?.(), config.pollIntervals.newsMs);
+  if (!app.isPackaged && process.argv.includes("--web-preview")) void openLocalWorkWeb();
 });
 
 app.on("before-quit", (event) => {
@@ -1617,6 +2005,7 @@ app.on("before-quit", (event) => {
   isQuitting = true;
   if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
   if (quotePollTimer) clearTimeout(quotePollTimer);
+  if (fastIndexPollTimer) clearTimeout(fastIndexPollTimer);
   if (marketPollTimer) clearTimeout(marketPollTimer);
   if (newsPollTimer) clearInterval(newsPollTimer);
   void (async () => {
@@ -1625,10 +2014,15 @@ app.on("before-quit", (event) => {
       if (alertEngine && alertStateStore) await persistAlertState();
     } catch (error) {
       console.error("Failed to persist shutdown state", error);
-    } finally {
-      shutdownReady = true;
-      app.quit();
     }
+    try {
+      await localWorkWeb?.close();
+      localWorkWeb = null;
+    } catch (error) {
+      console.error("Failed to close local work web", error);
+    }
+    shutdownReady = true;
+    app.quit();
   })();
 });
 

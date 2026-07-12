@@ -26,4 +26,47 @@ describe("settings renderer build contract", () => {
     assert.match(entry, /handleHoldingRuleToggle/);
     assert.match(entry, /当日有买卖时，今日盈亏仅供参考/);
   });
+
+  it("builds the lightweight Excel appearance as an independent renderer", async () => {
+    const root = process.cwd();
+    const entry = await readFile(path.join(root, "src", "excelRenderer.ts"), "utf8");
+    const styles = await readFile(path.join(root, "src", "excel.css"), "utf8");
+    const builder = await readFile(path.join(root, "scripts", "build-renderer.mjs"), "utf8");
+    const main = await readFile(path.join(root, "electron", "main.ts"), "utf8");
+
+    assert.match(builder, /compileTypeScript\("src\/excelRenderer\.ts",\s*"excel\.js"\)/);
+    assert.match(builder, /writeHtml\("excel\.html"/);
+    assert.match(main, /function createExcelWindow/);
+    assert.match(main, /打开月度工作台/);
+    assert.match(entry, /项目总览/);
+    assert.match(entry, /data-ribbon/);
+    assert.match(styles, /\.formula-bar/);
+    assert.match(styles, /\.sheet-grid/);
+    assert.match(styles, /-apple-system/);
+    assert.match(styles, /-webkit-app-region:\s*drag/);
+    assert.doesNotMatch(entry, /xlsx|formulaEngine|spreadsheet/i);
+  });
+
+  it("builds the local work webpage as an independent strict-CSP renderer", async () => {
+    const root = process.cwd();
+    const entry = await readFile(path.join(root, "src", "workRenderer.ts"), "utf8");
+    const styles = await readFile(path.join(root, "src", "workweb.css"), "utf8");
+    const builder = await readFile(path.join(root, "scripts", "build-renderer.mjs"), "utf8");
+    const main = await readFile(path.join(root, "electron", "main.ts"), "utf8");
+    const server = await readFile(path.join(root, "src", "services", "localWeb.ts"), "utf8");
+
+    assert.match(builder, /compileTypeScript\("src\/workRenderer\.ts",\s*"workweb\.js"\)/);
+    assert.match(builder, /writeHtml\("work\.html"/);
+    assert.match(main, /LocalWorkWebServer/);
+    assert.match(main, /打开项目工作网页/);
+    assert.match(entry, /EventSource/);
+    assert.match(entry, /内容保存在当前浏览器/);
+    assert.match(styles, /\.portal-columns/);
+    assert.match(entry, /escapeHtml\(item\.text\)/);
+    assert.match(entry, /safeUrl\(item\?\.url\)/);
+    assert.match(styles, /-apple-system/);
+    assert.match(server, /listen\(preferredPort, "127\.0\.0\.1"/);
+    assert.match(server, /host === `127\.0\.0\.1:\$\{this\.port\}`/);
+    assert.match(main, /shell\.openExternal\(localWorkWeb\.url\)/);
+  });
 });

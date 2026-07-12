@@ -75,6 +75,12 @@ export interface MarketDataOptions {
   dailyTtlMs?: number;
 }
 
+export interface FastIndexResult {
+  items: MarketIndexQuote[];
+  source: DataSource | null;
+  errors: string[];
+}
+
 const defaultProviders: MarketProviderSet = {
   eastmoneyIndices: (instruments) => fetchEastmoneyMarketIndices(instruments),
   tencentIndices: (instruments) => fetchTencentMarketIndices(instruments),
@@ -109,6 +115,8 @@ export class MarketDataCoordinator {
   private persistQueue: Promise<void> = Promise.resolve();
   private sectorItems: MarketSector[] | null = null;
   private sectorFetchedAt = 0;
+  private fastIndexResult: FastIndexResult | null = null;
+  private fastIndexFetchedAt = 0;
 
   constructor(
     private readonly providers: MarketProviderSet = defaultProviders,
@@ -123,7 +131,10 @@ export class MarketDataCoordinator {
     const cache = await this.ensureCache();
     const cached = cache.overview?.value;
     const errors: string[] = [];
-    const indicesOutcome = await this.fetchIndices(preferred, context);
+    const nowMs = context.nowMs ?? Date.now();
+    const indicesOutcome = this.fastIndexResult && nowMs - this.fastIndexFetchedAt <= 10_000
+      ? this.fastIndexResult
+      : await this.fetchIndices(preferred, context);
     errors.push(...indicesOutcome.errors);
 
     let indices = indicesOutcome.items;
@@ -136,7 +147,6 @@ export class MarketDataCoordinator {
     }
 
     const sectorLimit = this.options.overviewSectorLimit ?? 5;
-    const nowMs = context.nowMs ?? Date.now();
     if (!this.sectorItems && cached?.sectors.length) {
       this.sectorItems = cached.sectors;
       this.sectorFetchedAt = Date.parse(cache.overview?.savedAt ?? "") || 0;
@@ -206,6 +216,18 @@ export class MarketDataCoordinator {
       await this.persistCache();
     }
     return overview;
+  }
+
+  async fetchFastIndices(
+    preferred: LiveQuoteSource,
+    context: MarketFetchContext
+  ): Promise<FastIndexResult> {
+    const result = await this.fetchIndices(preferred, context);
+    if (result.items.length > 0) {
+      this.fastIndexResult = result;
+      this.fastIndexFetchedAt = context.nowMs ?? Date.now();
+    }
+    return result;
   }
 
   async fetchDetail(

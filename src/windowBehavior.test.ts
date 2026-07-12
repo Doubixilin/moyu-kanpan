@@ -58,11 +58,31 @@ describe("boss key window safety", () => {
     assert.match(main, /scheduleSecureStorageAvailabilityCheck\(\)/);
     assert.match(main, /secureStorageAvailable \?\? false/);
 
+    const quickStart = main.indexOf("function createQuickWindow");
+    const quickEnd = main.indexOf("function createExcelWindow", quickStart);
+    const quickWindow = main.slice(quickStart, quickEnd);
+    assert.match(quickWindow, /hiddenInMissionControl:\s*process\.platform === "darwin"/);
+    assert.match(quickWindow, /setWindowAlwaysOnTop\(window, true\)/);
+
+    const trayStateStart = main.indexOf("function createTrayStateIcon");
+    const trayStateEnd = main.indexOf("function registerGlobalShortcuts", trayStateStart);
+    const trayStateIcon = main.slice(trayStateStart, trayStateEnd);
+    assert.match(trayStateIcon, /process\.platform === "darwin"/);
+    assert.match(trayStateIcon, /createFromPath\(MAC_TRAY_TEMPLATE_ICON_PATH\)/);
+    assert.match(trayStateIcon, /template\.setTemplateImage\(true\)/);
+
     const settingsStart = main.indexOf("function openSettingsWindow");
     const settingsEnd = main.indexOf("function createTray", settingsStart);
     const settingsWindow = main.slice(settingsStart, settingsEnd);
     assert.match(settingsWindow, /window\.on\("hide"/);
     assert.match(settingsWindow, /restoreConfiguredAlwaysOnTop\(\)/);
+
+    const excelStart = main.indexOf("function createExcelWindow");
+    const excelEnd = main.indexOf("function openExcelWorkspace", excelStart);
+    const excelWindow = main.slice(excelStart, excelEnd);
+    assert.match(excelWindow, /getDisplayNearestPoint\(screen\.getCursorScreenPoint\(\)\)/);
+    assert.match(excelWindow, /ensureVisibleWindowBounds/);
+    assert.match(excelWindow, /fullscreenable:\s*false/);
   });
 
   it("packages the current macOS architecture as an app and DMG without replacing Windows", async () => {

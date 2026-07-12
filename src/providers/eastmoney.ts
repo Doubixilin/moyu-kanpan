@@ -52,7 +52,11 @@ export function parseEastmoneyQuoteList(payload: unknown): Quote[] {
   }));
 }
 
-export async function fetchEastmoneyQuotes(codes: string[], fetcher = fetch): Promise<Quote[]> {
+export async function fetchEastmoneyQuotes(
+  codes: string[],
+  fetcher = fetch,
+  timeoutMs = 2_500
+): Promise<Quote[]> {
   const secids = codes.map(buildEastmoneySecid).join(",");
   const url = new URL("https://push2.eastmoney.com/api/qt/ulist.np/get");
   url.searchParams.set("fltt", "2");
@@ -65,7 +69,7 @@ export async function fetchEastmoneyQuotes(codes: string[], fetcher = fetch): Pr
       Referer: "https://quote.eastmoney.com/",
       "User-Agent": "Mozilla/5.0"
     }
-  });
+  }, timeoutMs);
   if (!response.ok) throw new Error(`Eastmoney quotes failed: ${response.status}`);
   return parseEastmoneyQuoteList(await response.json());
 }

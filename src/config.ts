@@ -24,6 +24,7 @@ export type QuoteField = (typeof QUOTE_FIELDS)[number];
 export type QuoteSort = "manual" | "changePercentDesc" | "changePercentAbs";
 export type NewsMode = "all" | "watchlist_related" | "important";
 export type ThemeMode = "standard" | "stealth";
+export type RefreshMode = "standard" | "fast";
 export type SecurityMarket = "SH" | "SZ" | "BJ";
 export type TabType = (typeof TAB_TYPES)[number];
 
@@ -160,9 +161,15 @@ export interface UserSettings {
   ai: AiSettings;
   risk: RiskSettings;
   window: WindowSettings;
+  refreshPolicy?: {
+    mode: RefreshMode;
+  };
 }
 
 export interface AppConfig extends UserSettings {
+  refreshPolicy: {
+    mode: RefreshMode;
+  };
   pollIntervals: {
     quotesMs: number;
     newsMs: number;
@@ -227,6 +234,7 @@ export function loadAppConfigFromObject(
   const rawAi = asRecord(raw.ai);
   const rawNavigation = asRecord(raw.navigation);
   const rawRisk = asRecord(raw.risk);
+  const rawRefreshPolicy = asRecord(raw.refreshPolicy);
   const legacyOpacity = asNumber(rawWindow.opacity);
   const aiProvider: AiProvider = rawAi.provider === "custom" ? "custom" : "deepseek";
 
@@ -306,8 +314,11 @@ export function loadAppConfigFromObject(
       clickThrough: rawWindow.clickThrough === true,
       locked: rawWindow.locked === true
     },
+    refreshPolicy: {
+      mode: rawRefreshPolicy.mode === "standard" ? "standard" : "fast"
+    },
     pollIntervals: {
-      quotesMs: clampInteger(asNumber(rawPollIntervals.quotesMs) ?? 8_000, 5_000, 300_000),
+      quotesMs: clampInteger(asNumber(rawPollIntervals.quotesMs) ?? 5_000, 3_000, 300_000),
       newsMs: clampInteger(asNumber(rawPollIntervals.newsMs) ?? 60_000, 15_000, 600_000)
     },
     providers: {
@@ -328,6 +339,7 @@ export function mergeRawConfig(defaults: RawConfig, user: RawConfig): RawConfig 
     quotes: { ...asRecord(defaults.quotes), ...asRecord(user.quotes) },
     news: { ...asRecord(defaults.news), ...asRecord(user.news) },
     appearance: { ...asRecord(defaults.appearance), ...asRecord(user.appearance) },
+    refreshPolicy: { ...asRecord(defaults.refreshPolicy), ...asRecord(user.refreshPolicy) },
     ai: { ...asRecord(defaults.ai), ...asRecord(user.ai) },
     risk: {
       ...asRecord(defaults.risk),
@@ -364,7 +376,8 @@ export function toUserSettings(config: AppConfig): UserSettings {
       notifications: { ...config.risk.notifications },
       groups: config.risk.groups.map((group) => ({ ...group }))
     },
-    window: { ...config.window }
+    window: { ...config.window },
+    refreshPolicy: { ...config.refreshPolicy }
   };
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "floating-window-app",
   "productName": "摸鱼看盘",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Discreet translucent desktop widget for A-share quotes and news alerts.",
   "author": "Doubixilin",
@@ -22,6 +22,7 @@
     "smoke:profile": "npm run build && node scripts/smoke-profile.mjs",
     "smoke:safe-storage": "electron scripts/smoke-safe-storage.cjs",
     "smoke:ai-credential": "npm run build && electron scripts/smoke-ai-credential.cjs",
+    "benchmark:quotes": "npm run build && node scripts/benchmark-quotes.mjs",
     "start": "npm run build && electron .",
     "clean:release": "node scripts/clean-release.mjs",
     "package:win": "npm run clean:release && npm run build && electron-builder --win --x64 --publish never && node scripts/verify-packaged-app.mjs",

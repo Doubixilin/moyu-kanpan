@@ -35,6 +35,12 @@ const normalizedListing = stdout.replaceAll("\\", "/");
 for (const required of [
   "dist/index.html",
   "dist/settings.html",
+  "dist/quick.html",
+  "dist/excel.html",
+  "dist/work.html",
+  "dist/assets/quick.js",
+  "dist/assets/excel.js",
+  "dist/assets/workweb.js",
   "dist-electron/electron/main.js",
   "dist-electron/electron/preload.cjs",
   "config/defaults.json",

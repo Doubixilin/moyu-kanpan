@@ -1,0 +1,156 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  color: #202020;
+  background: #f3f3f3;
+  font-size: 12px;
+}
+
+* { box-sizing: border-box; }
+html, body, #excel-root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+button, select, input { font: inherit; }
+button { color: inherit; }
+.excel-app { width: 100%; height: 100%; display: grid; grid-template-rows: 36px 32px 112px 30px minmax(0, 1fr) 24px; background: #fff; border: 1px solid #7d7d7d; }
+
+.drag-region { -webkit-app-region: drag; }
+.no-drag, button, input, select { -webkit-app-region: no-drag; }
+.titlebar { display: grid; grid-template-columns: 128px minmax(240px, 1fr) 240px 44px 138px; align-items: center; height: 36px; color: #fff; background: #107c41; user-select: none; }
+.quick-access { height: 100%; display: flex; align-items: center; padding-left: 8px; gap: 1px; }
+.quick-access button, .window-controls button { border: 0; background: transparent; color: inherit; height: 100%; min-width: 34px; cursor: default; }
+.quick-access button:hover, .window-controls button:hover { background: rgba(255,255,255,.14); }
+.workbook-title { text-align: center; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.title-search { height: 24px; border-radius: 3px; display: flex; align-items: center; padding: 0 12px 0 30px; color: rgba(255,255,255,.82); background: rgba(255,255,255,.16); position: relative; }
+.title-search::before { content: "⌕"; position: absolute; left: 10px; font-size: 15px; }
+.account { display: grid; place-items: center; }
+.account span { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.92); color: #107c41; font-weight: 600; }
+.window-controls { height: 100%; display: grid; grid-template-columns: repeat(3, 46px); }
+.window-controls .close:hover { background: #c42b1c; }
+
+.ribbon-tabs { height: 32px; display: flex; align-items: stretch; background: #f8f8f8; border-bottom: 1px solid #d0d0d0; user-select: none; }
+.ribbon-tabs button { min-width: 54px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: default; }
+.ribbon-tabs button:hover { background: #e8f1eb; }
+.ribbon-tabs button.active { color: #107c41; font-weight: 600; border-bottom-color: #107c41; }
+.ribbon-tabs .file-tab { color: #fff; background: #0b6a36; min-width: 58px; }
+.ribbon-tabs .file-tab:hover { background: #095d30; }
+.share-hint { margin-left: auto; padding: 8px 18px; color: #5f5f5f; }
+
+.ribbon { min-width: 0; height: 112px; display: flex; align-items: stretch; padding: 4px 5px 2px; background: #fafafa; border-bottom: 1px solid #c9c9c9; overflow: hidden; user-select: none; }
+.ribbon-group { min-width: max-content; height: 100%; display: grid; grid-template-rows: minmax(0,1fr) 15px; padding: 0 5px; border-right: 1px solid #d7d7d7; }
+.ribbon-group-content { display: flex; align-items: center; gap: 3px; }
+.ribbon-group-label { align-self: end; text-align: center; color: #696969; font-size: 10px; line-height: 14px; }
+.ribbon button { border: 1px solid transparent; background: transparent; border-radius: 2px; cursor: default; }
+.ribbon button:hover { border-color: #b7d5c3; background: #e2f0e7; }
+.ribbon-large { width: 52px; height: 70px; display: grid; grid-template-rows: 42px auto; place-items: center; }
+.ribbon-large span { font-size: 25px; color: #286c4a; }
+.ribbon-large small { font-size: 10px; line-height: 12px; }
+.ribbon-command { min-width: 32px; height: 34px; display: grid; place-items: center; }
+.ribbon-command b { color: #315c44; font-size: 15px; font-weight: 500; }
+.ribbon-command small { font-size: 9px; }
+.ribbon-stack { display: grid; align-content: center; }
+.ribbon-stack button { height: 23px; text-align: left; padding: 0 7px; }
+.font-panel { width: 190px; display: grid; gap: 3px; }
+.font-panel > div { display: flex; }
+.font-panel select:first-child { width: 125px; }
+.font-panel select:last-child { width: 52px; }
+.font-panel select, .number-panel select { height: 24px; border: 1px solid #b7b7b7; background: white; }
+.font-panel .ribbon-command { display: block; height: 28px; min-width: 28px; }
+.number-panel { width: 150px; display: grid; gap: 5px; }
+.number-panel select { width: 100%; }
+.number-panel div { display: flex; }
+.number-panel button { height: 28px; min-width: 28px; }
+
+.formula-bar { height: 30px; display: grid; grid-template-columns: 85px 24px 24px 34px minmax(0,1fr); align-items: center; border-bottom: 1px solid #bcbcbc; background: #fff; }
+.name-box, .formula-input, .fx { height: 100%; display: flex; align-items: center; }
+.name-box { padding-left: 8px; border-right: 1px solid #c8c8c8; font-size: 11px; }
+.formula-bar button { height: 100%; border: 0; background: transparent; color: #666; }
+.formula-bar button:hover { background: #e5f1e9; }
+.fx { justify-content: center; border-right: 1px solid #c8c8c8; color: #656565; font-family: Georgia, serif; font-style: italic; }
+.formula-input { padding: 0 8px; overflow: hidden; white-space: nowrap; }
+.formula-input.editable { cursor: text; background: #fffef5; outline: 1px solid #6aa57f; outline-offset: -1px; }
+
+.worksheet-shell { min-height: 0; display: grid; grid-template-rows: minmax(0,1fr) 30px; }
+.grid-viewport { min-width: 0; min-height: 0; overflow: auto; outline: none; background: #fff; }
+.sheet-grid { border-collapse: separate; border-spacing: 0; table-layout: fixed; width: max-content; min-width: 100%; transform-origin: top left; }
+.sheet-grid th, .sheet-grid td { height: 22px; padding: 2px 5px; border-right: 1px solid #d9d9d9; border-bottom: 1px solid #d9d9d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 400; }
+.sheet-grid thead th { position: sticky; top: 0; z-index: 4; height: 24px; min-width: 84px; text-align: center; background: #f3f3f3; border-color: #bfbfbf; user-select: none; }
+.sheet-grid .corner { left: 0; z-index: 6; min-width: 42px; width: 42px; background: linear-gradient(135deg, #f2f2f2 49%, #b8b8b8 50%, #f2f2f2 52%); }
+.sheet-grid .row-number { position: sticky; left: 0; z-index: 3; width: 42px; min-width: 42px; text-align: center; background: #f3f3f3; border-color: #bfbfbf; color: #444; user-select: none; }
+.sheet-grid td { position: relative; min-width: 84px; max-width: 84px; background: #fff; }
+.sheet-grid td:nth-child(3), .sheet-grid th:nth-child(3) { min-width: 150px; max-width: 150px; }
+.sheet-grid td:nth-child(5), .sheet-grid th:nth-child(5) { min-width: 110px; max-width: 110px; }
+.sheet-grid td:nth-child(9), .sheet-grid th:nth-child(9) { min-width: 100px; max-width: 100px; }
+.sheet-grid td:nth-child(11), .sheet-grid th:nth-child(11) { min-width: 140px; max-width: 140px; }
+.sheet-grid[data-sheet-id="activity"] td:nth-child(5),
+.sheet-grid[data-sheet-id="activity"] th:nth-child(5) { min-width: 360px; max-width: 360px; }
+.sheet-grid[data-sheet-id="custom"] td:nth-child(3),
+.sheet-grid[data-sheet-id="custom"] th:nth-child(3) { min-width: 220px; max-width: 220px; }
+.sheet-grid[data-sheet-id="custom"] td:nth-child(4),
+.sheet-grid[data-sheet-id="custom"] th:nth-child(4),
+.sheet-grid[data-sheet-id="custom"] td:nth-child(5),
+.sheet-grid[data-sheet-id="custom"] th:nth-child(5) { min-width: 180px; max-width: 180px; }
+.sheet-grid td.selected::after { content: ""; position: absolute; inset: -1px; z-index: 2; border: 2px solid #107c41; pointer-events: none; }
+.sheet-grid td.selected::before { content: ""; position: absolute; width: 5px; height: 5px; right: -1px; bottom: -1px; z-index: 3; background: #107c41; }
+.sheet-grid .sheet-title { font-size: 16px; font-weight: 600; color: #1d3d2d; }
+.sheet-grid tbody tr:first-child td, .sheet-grid tbody tr:first-child th { height: 30px; }
+.sheet-grid .table-header { font-weight: 600; color: #fff; background: #217346; border-color: #3c8c62; }
+.sheet-grid .numeric { text-align: right; }
+.sheet-grid .attention-cell { color: #9a6700; background: #fff5ce; }
+.sheet-grid .ok-cell { color: #166534; }
+.sheet-grid .format-bold { font-weight: 700; }
+.sheet-grid .format-center { text-align: center; }
+.sheet-grid .format-fill { background: #fff2cc; }
+.sheet-grid.hide-gridlines td { border-color: transparent; }
+
+.trend-panel { min-width: 920px; min-height: 100%; padding: 18px 24px 40px; background-color: #fff; background-image: linear-gradient(#edf0ee 1px, transparent 1px), linear-gradient(90deg, #edf0ee 1px, transparent 1px); background-size: 84px 22px; }
+.trend-panel[hidden] { display: none; }
+.trend-toolbar { height: 48px; max-width: 1050px; display: flex; align-items: center; gap: 18px; padding: 7px 12px; border: 1px solid #d2d8d4; background: rgba(255,255,255,.96); }
+.trend-toolbar > div { display: grid; margin-right: auto; }
+.trend-toolbar strong { font-size: 14px; color: #1d3d2d; }
+.trend-toolbar span { color: #707070; font-size: 10px; }
+.trend-toolbar label { display: flex; align-items: center; gap: 6px; color: #555; }
+.trend-toolbar select { width: 190px; height: 27px; border: 1px solid #aaa; background: #fff; }
+.trend-toolbar button { height: 27px; padding: 0 12px; border: 1px solid #8dac99; background: #f6fbf8; }
+.trend-toolbar button:hover { background: #e5f2e9; }
+.trend-message { max-width: 1050px; padding: 42px 16px; color: #696969; text-align: center; background: rgba(255,255,255,.94); border: 1px solid #d6dbd8; border-top: 0; }
+.trend-chart-card { position: relative; max-width: 1050px; margin-top: 12px; padding: 14px 16px 10px; border: 1px solid #c9cfcb; background: rgba(255,255,255,.97); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.trend-legend { display: flex; justify-content: flex-end; gap: 16px; height: 22px; color: #555; font-size: 11px; }
+.trend-legend span::before { content: ""; display: inline-block; width: 16px; height: 2px; margin: 0 5px 3px 0; background: currentColor; }
+.trend-legend .close-key { color: #217346; }
+.trend-legend .upper-key { color: #647aa3; }
+.trend-legend .mid-key { color: #b07d23; }
+.trend-legend .lower-key { color: #8b6e9f; }
+.trend-chart { display: block; width: 100%; height: min(42vh, 380px); overflow: visible; }
+.trend-chart polyline { fill: none; vector-effect: non-scaling-stroke; stroke-width: 1.35; stroke-linejoin: round; stroke-linecap: round; }
+.trend-chart .trend-close { stroke: #217346; stroke-width: 2; }
+.trend-chart .trend-upper { stroke: #647aa3; }
+.trend-chart .trend-mid { stroke: #b07d23; stroke-dasharray: 4 3; }
+.trend-chart .trend-lower { stroke: #8b6e9f; }
+.trend-grid line { stroke: #d8ddda; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.trend-chart text { fill: #6a6a6a; font-size: 10px; }
+.trend-chart .end-label { text-anchor: end; }
+.trend-stats { display: flex; gap: 36px; padding: 8px 10px 2px 54px; border-top: 1px solid #e1e5e2; color: #666; }
+.trend-stats b { margin-left: 5px; color: #303030; font-weight: 600; }
+
+.sheetbar { height: 30px; display: flex; align-items: stretch; background: #f3f3f3; border-top: 1px solid #c7c7c7; }
+.sheetbar button { border: 0; background: transparent; cursor: default; }
+.sheet-nav { display: flex; border-right: 1px solid #ccc; }
+.sheet-nav button { width: 24px; color: #666; }
+.sheet-tabs { display: flex; }
+.sheet-tabs button { min-width: 88px; padding: 0 12px; border-right: 1px solid #ddd; border-bottom: 3px solid transparent; }
+.sheet-tabs button.active { color: #107c41; font-weight: 600; background: #fff; border-bottom-color: #107c41; }
+.new-sheet { width: 32px; font-size: 18px; }
+.horizontal-placeholder { flex: 1; border-left: 1px solid #ccc; background: linear-gradient(#f3f3f3,#ededed); }
+
+.statusbar { height: 24px; display: flex; align-items: center; padding-left: 10px; color: #333; background: #f3f3f3; border-top: 1px solid #d2d2d2; font-size: 11px; user-select: none; }
+.status-summary { margin-left: 24px; color: #555; }
+.view-buttons { margin-left: auto; height: 100%; display: flex; }
+.view-buttons button, .zoom-control button { width: 28px; height: 100%; border: 0; background: transparent; }
+.view-buttons button:hover, .zoom-control button:hover { background: #ddd; }
+.zoom-control { height: 100%; display: flex; align-items: center; gap: 3px; margin-right: 8px; }
+.zoom-control input { width: 90px; accent-color: #107c41; }
+.zoom-control span { width: 34px; text-align: right; }
+
+@media (max-width: 960px) {
+  .titlebar { grid-template-columns: 100px minmax(180px,1fr) 150px 36px 138px; }
+  .ribbon { overflow-x: auto; }
+  .status-summary { display: none; }
+}

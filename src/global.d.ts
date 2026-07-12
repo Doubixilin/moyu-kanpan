@@ -33,6 +33,10 @@ export interface FloatingStockApi {
   onSettings: (callback: (settings: UserSettings) => void) => () => void;
   openSettings: () => Promise<void>;
   hideWindow: () => Promise<void>;
+  showFullWindow: () => Promise<void>;
+  hideQuickView: () => Promise<void>;
+  openExcelWorkspace: () => Promise<void>;
+  controlExcelWindow: (action: "minimize" | "maximize" | "close") => Promise<void>;
   setActiveTab: (tabId: string) => Promise<UserSettings>;
   setBackgroundOpacity: (opacity: number) => Promise<UserSettings>;
   toggleTheme: () => Promise<UserSettings>;

@@ -214,3 +214,21 @@ macOS 分支已同步远程 `main` 的 `4c37694d938d3ece507772289508f877b7ee8755
 - 合并后重新执行 AI 凭据专项 smoke：Keychain 支撑的 `safeStorage` 可用，密文往返、明文缺失、bounds 保存、普通设置保存、主动清除全部通过。`preserveRuntimeSecrets()` 及两个主进程调用点、回归测试均仍存在；打包版重启、缩放、页面/透明度/置顶/穿透切换和跨新闻刷新验证结果见第 9 节。物理拖动窗口仍受桌面自动化限制，需人工补一次。
 
 最终验证：141 项单元/服务测试通过，TypeScript/Electron 构建通过，行情、新闻、profile、safeStorage 和 AI 凭据 smoke 全部通过。最终 `.app` 与 DMG 均通过严格深度签名校验，DMG CRC、挂载及挂载内 `.app` 校验通过；从仓库外空目录和隔离 userData 启动后加载 ASAR 页面，空启动目录保持无文件，设置、SQLite 与缓存只写入隔离 userData。
+
+## 11. 多工作面 main 同步与 macOS 0.1.1 复核（2026-07-12）
+
+macOS 分支已无损合入远程 `main` 的 `a0c5ebcea127b0add1912bbada5d61955f5d2741`。本地 `main` 先通过 `git pull --ff-only origin main` 快进，随后合并到 `codex/macos-port`；原有 Dock、Template Image、Keychain、窗口安全、macOS 打包和 Windows NSIS 配置均保留。发布版本从 0.1.0 更新为 0.1.1。
+
+本轮必要平台适配：
+
+- 动态托盘状态在 Windows 继续使用彩色状态图标；macOS 始终返回单色 `trayTemplate.png` 并调用 `setTemplateImage(true)`，避免状态刷新后退化为带底色图标。
+- 菜单栏速览窗在 macOS 使用 floating 置顶层级并隐藏于 Mission Control；按菜单栏所在显示器 work area 定位，不改变 Windows 的任务栏边缘算法。
+- Excel 外观工作台按当前显示器安全区域居中并限制最小尺寸，继续禁止全屏；标题栏拖动、最小化、最大化、关闭、表格滚动和实时数据均在 macOS 实机可用。
+- Excel、速览和本地工作网页增加 `-apple-system` / `BlinkMacSystemFont` 回退，Windows 仍继续使用 Segoe UI。
+- 回环工作网页只监听 `127.0.0.1`，Host、Origin、随机 token、HttpOnly SameSite Cookie 和严格 CSP 校验保持有效；Electron `shell.openExternal()` 已在 macOS 实际调用 Safari 成功打开随机端口页面。应用退出后监听端口关闭。
+- 退出前窗口位置保存继续使用 `preserveRuntimeSecrets()`，避免新关闭路径再次覆盖安全存储中的运行时 API Key。
+- 打包清单新增速览、Excel 和工作网页 HTML/JS/CSS，确保这些界面包含在 ASAR 中。
+
+验证环境仍为 Apple M4（arm64）、macOS 26.2、Node 22.23.1、npm 10.9.8、Electron 39.8.10、electron-builder 26.15.3。`npm test` 共 163 项通过，`npm run build`、`smoke:safe-storage`、`smoke:ai-credential` 和 `npm run package:mac` 均通过。0.1.1 `.app` 深度签名、DMG CRC 和 ASAR 新工作面清单校验通过；将 `.app` 复制到仓库外后可从空目录、隔离 userData 启动并加载自身 ASAR。
+
+桌面自动化仍无法让注入的 `Command+Shift+Space` 触发 Electron `globalShortcut`，菜单栏状态项也不向辅助功能树暴露。因此物理老板键、实际点击菜单栏速览和双显示器边缘定位仍列为发布前人工补测；对应注册、恢复路径、Template Image 和多显示器定位已有自动测试覆盖。

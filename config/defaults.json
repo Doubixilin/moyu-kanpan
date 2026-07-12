@@ -59,8 +59,11 @@
     "groups": []
   },
   "pollIntervals": {
-    "quotesMs": 8000,
+    "quotesMs": 5000,
     "newsMs": 60000
+  },
+  "refreshPolicy": {
+    "mode": "fast"
   },
   "providers": {
     "quote": "eastmoney",

@@ -226,4 +226,46 @@ describe("quote provider fallback", () => {
     await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
     assert.equal(calls[0], "tencent");
   });
+
+  it("uses wall-clock time for default cross checks", async () => {
+    let tencentCalls = 0;
+    const coordinator = new QuoteCoordinator({
+      eastmoney: async () => [quote("600519", "eastmoney")],
+      tencent: async () => {
+        tencentCalls += 1;
+        return [quote("600519", "tencent")];
+      }
+    });
+    const start = Date.parse("2026-07-10T02:00:00.000Z");
+
+    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start });
+    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start + 44_000 });
+    assert.equal(tencentCalls, 0);
+    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start + 45_000 });
+    assert.equal(tencentCalls, 1);
+  });
+
+  it("keeps a failed provider open for a wall-clock duration", async () => {
+    let eastmoneyCalls = 0;
+    const coordinator = new QuoteCoordinator({
+      eastmoney: async () => {
+        eastmoneyCalls += 1;
+        throw new Error("down");
+      },
+      tencent: async () => [quote("600519", "tencent")]
+    }, {
+      crossCheckIntervalMs: 0,
+      recoveryProbeIntervalMs: 1,
+      stickyMs: 0,
+      circuitFailureThreshold: 1,
+      circuitOpenMs: 15_000
+    });
+    const start = Date.parse("2026-07-10T02:00:00.000Z");
+
+    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start });
+    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start + 5_000 });
+    assert.equal(eastmoneyCalls, 1);
+    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start + 16_000 });
+    assert.equal(eastmoneyCalls, 2);
+  });
 });
