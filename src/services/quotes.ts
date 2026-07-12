@@ -41,11 +41,15 @@ export interface QuoteFetchResult {
 
 export interface QuoteCoordinatorOptions {
   crossCheckEvery?: number;
+  crossCheckIntervalMs?: number;
   recoveryProbeEvery?: number;
+  recoveryProbeIntervalMs?: number;
   recoverySuccesses?: number;
   stickyCycles?: number;
+  stickyMs?: number;
   circuitFailureThreshold?: number;
   circuitOpenCycles?: number;
+  circuitOpenMs?: number;
   healthWindow?: number;
 }
 
@@ -61,6 +65,7 @@ interface ProviderRuntime {
   samples: HealthSample[];
   consecutiveFailures: number;
   openUntilCycle: number;
+  openUntilMs: number;
   conflictObservations: number;
   conflicts: number;
 }
@@ -84,15 +89,21 @@ export class QuoteCoordinator {
   private activeSource: QuoteProviderName | null = null;
   private lastPreferred: QuoteProviderName | null = null;
   private activeSinceCycle = 0;
+  private activeSinceMs = 0;
+  private lastCrossCheckAt = 0;
+  private lastRecoveryProbeAt = 0;
+  private currentNowMs = 0;
   private preferredRecoverySuccesses = 0;
   private readonly lastTrusted = new Map<string, Quote>();
   private readonly runtime: Record<QuoteProviderName, ProviderRuntime> = {
     eastmoney: {
       samples: [], consecutiveFailures: 0, openUntilCycle: 0,
+      openUntilMs: 0,
       conflictObservations: 0, conflicts: 0
     },
     tencent: {
       samples: [], consecutiveFailures: 0, openUntilCycle: 0,
+      openUntilMs: 0,
       conflictObservations: 0, conflicts: 0
     }
   };
@@ -108,30 +119,31 @@ export class QuoteCoordinator {
     context: QuoteValidationContext = { marketOpen: false }
   ): Promise<QuoteFetchResult> {
     this.cycle += 1;
+    const nowMs = context.nowMs ?? Date.now();
+    this.currentNowMs = nowMs;
     const requestedCodes = [...new Set(codes.map((code) => code.trim()).filter(Boolean))];
     if (this.lastPreferred !== preferred) {
       this.lastPreferred = preferred;
       this.activeSource = preferred;
       this.activeSinceCycle = this.cycle;
+      this.activeSinceMs = nowMs;
+      this.lastCrossCheckAt = nowMs;
+      this.lastRecoveryProbeAt = nowMs;
       this.preferredRecoverySuccesses = 0;
     }
 
     let primarySource = this.activeSource ?? preferred;
-    if (this.isCircuitOpen(primarySource)) primarySource = otherSource(primarySource);
+    if (this.isCircuitOpen(primarySource, nowMs)) primarySource = otherSource(primarySource);
     const secondarySource = otherSource(primarySource);
     const primary = await this.attempt(primarySource, requestedCodes, context);
 
     const unresolved = requestedCodes.filter(
       (code) => !primary.validations.get(code)?.trusted
     );
-    const crossCheckEvery = this.options.crossCheckEvery ?? 6;
-    const crossCheck = crossCheckEvery > 0 && this.cycle % crossCheckEvery === 0;
-    const recoveryProbeEvery = this.options.recoveryProbeEvery ?? 3;
-    const stickyCycles = this.options.stickyCycles ?? 3;
-    const recoveryProbe = primarySource !== preferred &&
-      this.cycle - this.activeSinceCycle >= stickyCycles &&
-      recoveryProbeEvery > 0 &&
-      this.cycle % recoveryProbeEvery === 0;
+    const crossCheck = this.shouldCrossCheck(nowMs);
+    const recoveryProbe = primarySource !== preferred && this.shouldProbeRecovery(nowMs);
+    if (crossCheck) this.lastCrossCheckAt = nowMs;
+    if (recoveryProbe) this.lastRecoveryProbeAt = nowMs;
     const secondaryCodes = crossCheck || recoveryProbe ? requestedCodes : unresolved;
     const secondary = secondaryCodes.length > 0
       ? await this.attempt(secondarySource, secondaryCodes, context)
@@ -268,7 +280,8 @@ export class QuoteCoordinator {
     context: QuoteValidationContext
   ): Promise<ProviderAttempt> {
     if (requestedCodes.length === 0) return emptyAttempt(source);
-    if (this.isCircuitOpen(source)) {
+    const nowMs = context.nowMs ?? Date.now();
+    if (this.isCircuitOpen(source, nowMs)) {
       return {
         ...emptyAttempt(source),
         requestedCodes,
@@ -310,7 +323,8 @@ export class QuoteCoordinator {
         parseFailure,
         latencyMs
       },
-      trustedCount > 0
+      trustedCount > 0,
+      nowMs
     );
 
     return {
@@ -326,7 +340,8 @@ export class QuoteCoordinator {
   private recordAttempt(
     source: QuoteProviderName,
     sample: HealthSample,
-    operational: boolean
+    operational: boolean,
+    nowMs: number
   ): void {
     const runtime = this.runtime[source];
     runtime.samples.push(sample);
@@ -336,18 +351,24 @@ export class QuoteCoordinator {
     if (operational) {
       runtime.consecutiveFailures = 0;
       runtime.openUntilCycle = 0;
+      runtime.openUntilMs = 0;
       return;
     }
 
     runtime.consecutiveFailures += 1;
     const threshold = this.options.circuitFailureThreshold ?? 3;
     if (runtime.consecutiveFailures >= threshold) {
-      runtime.openUntilCycle = this.cycle + (this.options.circuitOpenCycles ?? 3);
+      if (this.options.circuitOpenCycles !== undefined) {
+        runtime.openUntilCycle = this.cycle + this.options.circuitOpenCycles;
+      } else {
+        runtime.openUntilMs = nowMs + (this.options.circuitOpenMs ?? 15_000);
+      }
     }
   }
 
-  private isCircuitOpen(source: QuoteProviderName): boolean {
-    return this.runtime[source].openUntilCycle > this.cycle;
+  private isCircuitOpen(source: QuoteProviderName, nowMs: number): boolean {
+    const runtime = this.runtime[source];
+    return runtime.openUntilCycle > this.cycle || runtime.openUntilMs > nowMs;
   }
 
   private observeConflict(source: QuoteProviderName, conflict: boolean): void {
@@ -371,6 +392,8 @@ export class QuoteCoordinator {
           secondaryTrusted > 0) {
         this.activeSource = secondary.source;
         this.activeSinceCycle = this.cycle;
+        this.activeSinceMs = this.currentNowMs;
+        this.lastRecoveryProbeAt = this.currentNowMs;
         this.preferredRecoverySuccesses = 0;
       }
       return;
@@ -385,6 +408,7 @@ export class QuoteCoordinator {
     if (this.preferredRecoverySuccesses >= (this.options.recoverySuccesses ?? 2)) {
       this.activeSource = preferred;
       this.activeSinceCycle = this.cycle;
+      this.activeSinceMs = this.currentNowMs;
       this.preferredRecoverySuccesses = 0;
     }
   }
@@ -398,7 +422,7 @@ export class QuoteCoordinator {
       const freshnessRate = average(samples.map((sample) => sample.freshness));
       const parseFailureRate = average(samples.map((sample) => sample.parseFailure));
       const latencies = samples.map((sample) => sample.latencyMs).sort((a, b) => a - b);
-      const circuitState = runtime.openUntilCycle > this.cycle
+      const circuitState = runtime.openUntilCycle > this.cycle || runtime.openUntilMs > this.currentNowMs
         ? "open"
         : runtime.consecutiveFailures >= (this.options.circuitFailureThreshold ?? 3)
           ? "half-open"
@@ -418,6 +442,28 @@ export class QuoteCoordinator {
         circuitState
       };
     });
+  }
+
+  private shouldCrossCheck(nowMs: number): boolean {
+    if (this.options.crossCheckEvery !== undefined) {
+      return this.options.crossCheckEvery > 0 && this.cycle % this.options.crossCheckEvery === 0;
+    }
+    const intervalMs = this.options.crossCheckIntervalMs ?? 45_000;
+    return intervalMs > 0 && nowMs - this.lastCrossCheckAt >= intervalMs;
+  }
+
+  private shouldProbeRecovery(nowMs: number): boolean {
+    if (this.options.recoveryProbeEvery !== undefined ||
+        this.options.stickyCycles !== undefined) {
+      const every = this.options.recoveryProbeEvery ?? 3;
+      const sticky = this.options.stickyCycles ?? 3;
+      return this.cycle - this.activeSinceCycle >= sticky &&
+        every > 0 && this.cycle % every === 0;
+    }
+    const intervalMs = this.options.recoveryProbeIntervalMs ?? 20_000;
+    const stickyMs = this.options.stickyMs ?? 10_000;
+    return nowMs - this.activeSinceMs >= stickyMs &&
+      intervalMs > 0 && nowMs - this.lastRecoveryProbeAt >= intervalMs;
   }
 }
 

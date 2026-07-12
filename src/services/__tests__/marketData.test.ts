@@ -92,6 +92,24 @@ class MemoryCache implements MarketCacheStore {
 }
 
 describe("market data coordinator", () => {
+  it("reuses a recent fast-index result in the heavier overview", async () => {
+    const set = providers();
+    let indexCalls = 0;
+    set.eastmoneyIndices = async (instruments) => {
+      indexCalls += 1;
+      return instruments.map((item) => indexQuote(item, "eastmoney"));
+    };
+    const coordinator = new MarketDataCoordinator(set);
+    await coordinator.fetchFastIndices("eastmoney", { marketOpen: true, nowMs });
+    const overview = await coordinator.fetchOverview("eastmoney", {
+      marketOpen: true,
+      nowMs: nowMs + 5_000
+    });
+
+    assert.equal(indexCalls, 1);
+    assert.equal(overview.indices.length, 3);
+  });
+
   it("fills only missing indices from fallback and preserves requested order", async () => {
     const set = providers();
     let fallbackRequest: string[] = [];

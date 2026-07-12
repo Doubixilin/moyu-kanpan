@@ -25,11 +25,15 @@ export function parseTencentQuoteText(text: string): Quote[] {
   });
 }
 
-export async function fetchTencentQuotes(codes: string[], fetcher = fetch): Promise<Quote[]> {
+export async function fetchTencentQuotes(
+  codes: string[],
+  fetcher = fetch,
+  timeoutMs = 2_500
+): Promise<Quote[]> {
   const symbols = codes.map((code) => `${marketPrefixForCode(code)}${code}`).join(",");
   const response = await fetchWithTimeout(fetcher, `https://qt.gtimg.cn/q=${symbols}`, {
     headers: { "User-Agent": "Mozilla/5.0" }
-  });
+  }, timeoutMs);
   if (!response.ok) throw new Error(`Tencent quotes failed: ${response.status}`);
   const buffer = Buffer.from(await response.arrayBuffer());
   return parseTencentQuoteText(decode(buffer, "gbk"));

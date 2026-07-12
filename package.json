@@ -19,6 +19,7 @@
     "smoke:data": "npm run build && node scripts/smoke-data.mjs",
     "smoke:news": "npm run build && node scripts/smoke-news-events.mjs",
     "smoke:profile": "npm run build && node scripts/smoke-profile.mjs",
+    "benchmark:quotes": "npm run build && node scripts/benchmark-quotes.mjs",
     "start": "npm run build && electron .",
     "clean:release": "node scripts/clean-release.mjs",
     "package:win": "npm run clean:release && npm run build && electron-builder --win --x64 --publish never && node scripts/verify-packaged-app.mjs"

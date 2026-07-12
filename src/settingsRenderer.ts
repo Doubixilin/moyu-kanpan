@@ -8,6 +8,7 @@ import type {
   NewsMode,
   QuoteField,
   QuoteSort,
+  RefreshMode,
   TabConfig,
   TabType,
   ThemeMode,
@@ -337,6 +338,13 @@ function render(): void {
           <select data-setting="theme">
             ${option("standard", "标准彩色", settings.appearance.theme)}
             ${option("stealth", "低调灰阶", settings.appearance.theme)}
+          </select>
+        </label>
+        <label class="form-row">
+          <span>行情刷新</span>
+          <select data-setting="refresh-mode">
+            ${option("fast", "较快：查看时3秒，后台5秒", settings.refreshPolicy?.mode ?? "fast")}
+            ${option("standard", "标准：查看时5秒，后台8秒", settings.refreshPolicy?.mode ?? "fast")}
           </select>
         </label>
         <label class="range-row">
@@ -808,6 +816,9 @@ function handleFormChange(event: Event): void {
     settings.news.maxItems = Math.min(30, Math.max(1, Number(target.value) || 1));
   }
   if (setting === "theme") settings.appearance.theme = target.value as ThemeMode;
+  if (setting === "refresh-mode") {
+    settings.refreshPolicy = { mode: target.value as RefreshMode };
+  }
   if (setting === "background-opacity") {
     settings.appearance.backgroundOpacity = Number(target.value) / 100;
     const output = document.getElementById("opacity-value");

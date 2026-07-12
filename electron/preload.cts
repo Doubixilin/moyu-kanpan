@@ -44,6 +44,10 @@ const api: FloatingStockApi = {
   },
   openSettings: () => ipcRenderer.invoke("settings:open") as Promise<void>,
   hideWindow: () => ipcRenderer.invoke("window:hide") as Promise<void>,
+  showFullWindow: () => ipcRenderer.invoke("window:showFull") as Promise<void>,
+  hideQuickView: () => ipcRenderer.invoke("quick:hide") as Promise<void>,
+  openExcelWorkspace: () => ipcRenderer.invoke("excel:open") as Promise<void>,
+  controlExcelWindow: (action) => ipcRenderer.invoke("excel:windowAction", action) as Promise<void>,
   setActiveTab: (tabId) =>
     ipcRenderer.invoke("navigation:setActiveTab", tabId) as Promise<UserSettings>,
   setBackgroundOpacity: (opacity) =>
