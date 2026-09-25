@@ -10,30 +10,82 @@ function current(): UserSettings {
     schemaVersion: 8,
     personalSeedVersion: 1,
     securities: [{ code: "000001", market: "SZ", name: "平安银行", alias: "" }],
-    holdings: [{
-      securityCode: "000001", quantity: 3000, costPrice: 10, groupId: "all", note: "",
-      alertRules: {
-        enabled: true, stopLossPrice: 9, watchPrice: 11, priceAbove: null, priceBelow: null,
-        risePercent: null, fallPercent: null, dailyProfitAmount: null, dailyLossAmount: null,
-        totalProfitAmount: null, totalLossAmount: null
+    holdings: [
+      {
+        securityCode: "000001",
+        quantity: 3000,
+        costPrice: 10,
+        groupId: "all",
+        note: "",
+        alertRules: {
+          enabled: true,
+          stopLossPrice: 9,
+          watchPrice: 11,
+          priceAbove: null,
+          priceBelow: null,
+          risePercent: null,
+          fallPercent: null,
+          dailyProfitAmount: null,
+          dailyLossAmount: null,
+          totalProfitAmount: null,
+          totalLossAmount: null
+        }
       }
-    }],
+    ],
     watchlist: [{ securityCode: "000001", visible: true, order: 0, groupId: "all" }],
-    tabs: [{ id: "holdings", type: "holdings", title: "持仓", builtIn: true, visible: true, order: 0, securityCodes: [], maxItems: 8, newsMode: "important" }],
+    tabs: [
+      {
+        id: "holdings",
+        type: "holdings",
+        title: "持仓",
+        builtIn: true,
+        visible: true,
+        order: 0,
+        securityCodes: [],
+        maxItems: 8,
+        newsMode: "important"
+      }
+    ],
     navigation: { defaultTabId: "holdings", rememberLastTab: false, lastActiveTabId: "holdings" },
     quotes: { fields: ["price", "changePercent"], sort: "manual" },
     news: { mode: "important", maxItems: 5 },
     appearance: { theme: "stealth", backgroundOpacity: 0.8 },
-    ai: { enabled: true, provider: "deepseek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", timeoutSeconds: 20 },
-    risk: {
-      mode: "active", accountBaseline: 50_000, oneR: 500, maxPositionValue: null,
-      maxHoldingCount: null, maxTotalExposurePercent: null,
-      portfolioDailyProfitThreshold: null, portfolioDailyLossThreshold: null,
-      stopWarningPercent: 2, hysteresisPercent: 0.2, cooldownMinutes: 15,
-      oncePerDay: false, onlyDuringTrading: true,
-      notifications: { widget: true, tray: true, windows: false }, groups: []
+    ai: {
+      enabled: true,
+      provider: "deepseek",
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-flash",
+      timeoutSeconds: 20
     },
-    window: { width: 380, height: 680, x: null, y: null, alwaysOnTop: true, trayOnly: true, bossKeyEnabled: true, bossKeyAccelerator: "CommandOrControl+Alt+Space", clickThrough: false, locked: false }
+    risk: {
+      mode: "active",
+      accountBaseline: 50_000,
+      oneR: 500,
+      maxPositionValue: null,
+      maxHoldingCount: null,
+      maxTotalExposurePercent: null,
+      portfolioDailyProfitThreshold: null,
+      portfolioDailyLossThreshold: null,
+      stopWarningPercent: 2,
+      hysteresisPercent: 0.2,
+      cooldownMinutes: 15,
+      oncePerDay: false,
+      onlyDuringTrading: true,
+      notifications: { widget: true, tray: true, windows: false },
+      groups: []
+    },
+    window: {
+      width: 380,
+      height: 680,
+      x: null,
+      y: null,
+      alwaysOnTop: true,
+      trayOnly: true,
+      bossKeyEnabled: true,
+      bossKeyAccelerator: "CommandOrControl+Alt+Space",
+      clickThrough: false,
+      locked: false
+    }
   };
 }
 
@@ -65,15 +117,22 @@ describe("portable profile packages", () => {
     const payload = JSON.stringify({
       profileVersion: 1,
       securities: [{ code: "600519", market: "SH", name: "贵州茅台", alias: "" }],
-      holdings: [{
-        securityCode: "600519", quantity: 100, costPrice: 1200,
-        alertRules: { enabled: true, stopLossPrice: 1080 }
-      }],
+      holdings: [
+        {
+          securityCode: "600519",
+          quantity: 100,
+          costPrice: 1200,
+          alertRules: { enabled: true, stopLossPrice: 1080 }
+        }
+      ],
       watchlist: ["600519"]
     });
     const preview = previewProfileImport(current(), payload, "replace");
     assert.equal(preview.valid, true);
-    assert.deepEqual(preview.nextSettings?.holdings.map((item) => item.securityCode), ["600519"]);
+    assert.deepEqual(
+      preview.nextSettings?.holdings.map((item) => item.securityCode),
+      ["600519"]
+    );
     assert.equal(preview.nextSettings?.risk.mode, "shadow");
     assert.deepEqual(preview.diff.holdingsRemoved, ["000001"]);
     assert.ok(preview.issues.some((issue) => issue.severity === "warning"));
@@ -102,7 +161,11 @@ describe("portable profile packages", () => {
   });
 
   it("accepts a JSON code fence for convenient agent handoff", () => {
-    const preview = previewProfileImport(current(), "```json\n{\"profileVersion\":1,\"watchlist\":[\"000001\"]}\n```", "merge");
+    const preview = previewProfileImport(
+      current(),
+      '```json\n{"profileVersion":1,"watchlist":["000001"]}\n```',
+      "merge"
+    );
     assert.equal(preview.valid, true);
     assert.equal(preview.hasChanges, false);
   });
@@ -116,10 +179,14 @@ describe("portable profile packages", () => {
   });
 
   it("does not delete portfolio collections when replace only updates security metadata", () => {
-    const preview = previewProfileImport(current(), JSON.stringify({
-      profileVersion: 1,
-      securities: [{ code: "000001", market: "SZ", name: "平安银行", alias: "新别名" }]
-    }), "replace");
+    const preview = previewProfileImport(
+      current(),
+      JSON.stringify({
+        profileVersion: 1,
+        securities: [{ code: "000001", market: "SZ", name: "平安银行", alias: "新别名" }]
+      }),
+      "replace"
+    );
     assert.equal(preview.valid, true);
     assert.equal(preview.nextSettings?.holdings.length, 1);
     assert.equal(preview.nextSettings?.watchlist.length, 1);
@@ -127,10 +194,14 @@ describe("portable profile packages", () => {
   });
 
   it("rejects a market that conflicts with the security code", () => {
-    const preview = previewProfileImport(current(), JSON.stringify({
-      profileVersion: 1,
-      securities: [{ code: "600519", market: "SZ", name: "示例股票" }]
-    }), "merge");
+    const preview = previewProfileImport(
+      current(),
+      JSON.stringify({
+        profileVersion: 1,
+        securities: [{ code: "600519", market: "SZ", name: "示例股票" }]
+      }),
+      "merge"
+    );
     assert.equal(preview.valid, false);
     assert.ok(preview.issues.some((issue) => issue.path.endsWith(".market")));
   });
@@ -139,27 +210,128 @@ describe("portable profile packages", () => {
     const settings = current();
     settings.securities.push({ code: "600519", market: "SH", name: "示例股票", alias: "" });
     settings.watchlist.push({ securityCode: "600519", visible: true, order: 1, groupId: "all" });
-    const preview = previewProfileImport(settings, JSON.stringify({
-      profileVersion: 1,
-      watchlist: [
-        { securityCode: "600519", visible: true, order: 0 },
-        { securityCode: "000001", visible: false, order: 1 }
-      ]
-    }), "replace");
+    const preview = previewProfileImport(
+      settings,
+      JSON.stringify({
+        profileVersion: 1,
+        watchlist: [
+          { securityCode: "600519", visible: true, order: 0 },
+          { securityCode: "000001", visible: false, order: 1 }
+        ]
+      }),
+      "replace"
+    );
     assert.equal(preview.valid, true);
     assert.deepEqual(preview.diff.watchlistUpdated.sort(), ["000001", "600519"]);
   });
 
   it("rejects a package that exceeds the savable watchlist limit", () => {
     const securities = Array.from({ length: 51 }, (_, index) => ({
-      code: String(600000 + index), market: "SH", name: `示例${index}`
+      code: String(600000 + index),
+      market: "SH",
+      name: `示例${index}`
     }));
-    const preview = previewProfileImport(current(), JSON.stringify({
-      profileVersion: 1,
-      securities,
-      watchlist: securities.map((security) => security.code)
-    }), "replace");
+    const preview = previewProfileImport(
+      current(),
+      JSON.stringify({
+        profileVersion: 1,
+        securities,
+        watchlist: securities.map((security) => security.code)
+      }),
+      "replace"
+    );
     assert.equal(preview.valid, false);
     assert.ok(preview.issues.some((issue) => /最多50只/.test(issue.message)));
+  });
+
+  it("reports over-limit securities instead of silently truncating them", () => {
+    const securities = Array.from({ length: 120 }, (_, index) => ({
+      code: String(600000 + index),
+      market: "SH",
+      name: `示例${index}`
+    }));
+    const preview = previewProfileImport(
+      current(),
+      JSON.stringify({
+        profileVersion: 1,
+        securities
+      }),
+      "merge"
+    );
+
+    assert.equal(preview.valid, false);
+    assert.ok(preview.issues.some((issue) => /最多 100 只证券，当前 120 只/.test(issue.message)));
+  });
+
+  it("accepts cooldownMinutes of 0, which config explicitly allows", () => {
+    const preview = previewProfileImport(
+      current(),
+      JSON.stringify({
+        profileVersion: 1,
+        risk: { cooldownMinutes: 0 }
+      }),
+      "merge"
+    );
+
+    assert.equal(preview.valid, true);
+    assert.equal(preview.nextSettings?.risk.cooldownMinutes, 0);
+  });
+
+  it("rejects explicit null for risk fields that are not nullable", () => {
+    for (const key of ["stopWarningPercent", "hysteresisPercent", "cooldownMinutes"]) {
+      const preview = previewProfileImport(
+        current(),
+        JSON.stringify({
+          profileVersion: 1,
+          risk: { [key]: null }
+        }),
+        "merge"
+      );
+      assert.equal(preview.valid, false, `${key} 为 null 时应被拒绝`);
+      assert.ok(preview.issues.some((issue) => issue.path === `$.risk.${key}`));
+    }
+  });
+
+  it("rejects out-of-range risk percentages", () => {
+    const preview = previewProfileImport(
+      current(),
+      JSON.stringify({
+        profileVersion: 1,
+        risk: { stopWarningPercent: 500 }
+      }),
+      "merge"
+    );
+
+    assert.equal(preview.valid, false);
+    assert.ok(preview.issues.some((issue) => issue.path === "$.risk.stopWarningPercent"));
+  });
+
+  it("applies the package's watchlist order in merge mode", () => {
+    const settings = current();
+    settings.securities.push({ code: "600519", market: "SH", name: "贵州茅台", alias: "" });
+    settings.watchlist.push({ securityCode: "600519", visible: true, order: 1, groupId: "all" });
+
+    const preview = previewProfileImport(
+      settings,
+      JSON.stringify({
+        profileVersion: 1,
+        watchlist: [
+          { securityCode: "600519", visible: true, order: 0 },
+          { securityCode: "000001", visible: true, order: 1 }
+        ]
+      }),
+      "merge"
+    );
+
+    // 此前 merge 会保留原有插入顺序，包里的顺序被丢弃并报"没有差异"。
+    assert.equal(preview.hasChanges, true);
+    assert.deepEqual(
+      preview.nextSettings?.watchlist.map((item) => item.securityCode),
+      ["600519", "000001"]
+    );
+    assert.deepEqual(
+      preview.nextSettings?.watchlist.map((item) => item.order),
+      [0, 1]
+    );
   });
 });

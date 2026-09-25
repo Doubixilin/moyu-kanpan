@@ -14,19 +14,12 @@ describe("quick window bounds", () => {
   });
 
   it("opens below a top taskbar tray", () => {
-    assert.equal(
-      quickWindowBounds({ x: 1880, y: 0, width: 24, height: 24 }, workArea, size).y,
-      32
-    );
+    assert.equal(quickWindowBounds({ x: 1880, y: 0, width: 24, height: 24 }, workArea, size).y, 32);
   });
 
   it("stays inside a secondary display with a right taskbar", () => {
     const secondary = { x: -1280, y: 0, width: 1280, height: 984 };
-    const result = quickWindowBounds(
-      { x: -24, y: 940, width: 24, height: 24 },
-      secondary,
-      size
-    );
+    const result = quickWindowBounds({ x: -24, y: 940, width: 24, height: 24 }, secondary, size);
     assert.equal(result.x, -352);
     assert.ok(result.y >= secondary.y);
     assert.ok(result.y + result.height <= secondary.y + secondary.height);

@@ -23,7 +23,9 @@ const baseQuote: Quote = {
 describe("quote feed freshness", () => {
   it("tracks value changes independently from source timestamps", () => {
     const first = quoteFingerprint([baseQuote]);
-    const sourceTimeOnly = quoteFingerprint([{ ...baseQuote, updatedAt: "2026-07-10T02:00:39.000Z" }]);
+    const sourceTimeOnly = quoteFingerprint([
+      { ...baseQuote, updatedAt: "2026-07-10T02:00:39.000Z" }
+    ]);
     const changedVolume = quoteFingerprint([{ ...baseQuote, volume: 123500 }]);
     assert.equal(sourceTimeOnly, first);
     assert.notEqual(changedVolume, first);
@@ -48,10 +50,13 @@ describe("quote feed freshness", () => {
     };
     assert.equal(isQuoteFeedStalled({ ...input, marketOpen: true }), true);
     assert.equal(isQuoteFeedStalled({ ...input, marketOpen: false }), false);
-    assert.equal(isQuoteFeedStalled({
-      ...input,
-      marketOpen: true,
-      dataUpdatedAt: "2026-07-10T02:00:50.000Z"
-    }), false);
+    assert.equal(
+      isQuoteFeedStalled({
+        ...input,
+        marketOpen: true,
+        dataUpdatedAt: "2026-07-10T02:00:50.000Z"
+      }),
+      false
+    );
   });
 });

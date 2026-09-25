@@ -7,7 +7,13 @@ import type {
   UserSettings,
   WatchlistMembership
 } from "../config.js";
-import { assertSavableSettings } from "../config.js";
+import {
+  assertSavableSettings,
+  inferSecurityMarket,
+  MAX_HOLDING_COST_PRICE,
+  MAX_HOLDING_QUANTITY,
+  MIN_HOLDING_COST_PRICE
+} from "../config.js";
 
 export const PROFILE_VERSION = 1;
 export type ProfileImportMode = "merge" | "replace";
@@ -47,7 +53,13 @@ interface ParsedProfile {
   watchlist?: WatchlistMembership[];
   riskGroups?: RiskSettings["groups"];
   riskPatch?: RiskPatch;
-  hasRuleContent: boolean;
+  /**
+   * 包是否改动了提醒相关设置（含 `risk` 任意字段、风险组、以及带提醒规则的持仓）。
+   *
+   * 名字此前叫 `hasRuleContent`，但它对任何 `raw.risk` 对象都成立（哪怕只改通知渠道），
+   * 语义上是"包动过提醒设置"。它用于门控"强制切影子模式"这一保守行为。
+   */
+  touchesRiskSettings: boolean;
 }
 
 type RiskPatch = Partial<Omit<RiskSettings, "groups" | "notifications">> & {
@@ -69,15 +81,50 @@ const EMPTY_ALERT_RULES: HoldingAlertRules = {
 };
 
 const ROOT_KEYS = new Set([
-  "profileVersion", "generatedAt", "source", "securities",
-  "holdings", "watchlist", "riskGroups", "risk"
+  "profileVersion",
+  "generatedAt",
+  "source",
+  "securities",
+  "holdings",
+  "watchlist",
+  "riskGroups",
+  "risk"
 ]);
 const ALERT_KEYS = new Set(Object.keys(EMPTY_ALERT_RULES));
-const RISK_NUMBER_FIELDS = new Set([
-  "accountBaseline", "oneR", "maxPositionValue", "maxHoldingCount",
-  "maxTotalExposurePercent", "portfolioDailyProfitThreshold",
-  "portfolioDailyLossThreshold", "stopWarningPercent", "hysteresisPercent",
-  "cooldownMinutes"
+/**
+ * 集合上限，与 config.assertSavableSettings 保持一致。
+ * 超限一律作为 error 报出，绝不静默截断（截断会让后续引用报出误导性错误）。
+ */
+const MAX_SECURITIES = 100;
+const MAX_HOLDINGS = 100;
+const MAX_WATCHLIST = 50;
+/**
+ * 类型上可为 null 的风险数值字段（null 表示关闭该约束）。
+ * 注意 stopWarningPercent / hysteresisPercent / cooldownMinutes 在 RiskSettings 里是
+ * `number`，不接受 null，因此单独列出。
+ */
+const RISK_NULLABLE_NUMBER_FIELDS = new Set([
+  "accountBaseline",
+  "oneR",
+  "maxPositionValue",
+  "maxHoldingCount",
+  "maxTotalExposurePercent",
+  "portfolioDailyProfitThreshold",
+  "portfolioDailyLossThreshold"
+]);
+/** 不可为 null 的风险数值字段 → 合法区间（与 config.ts 的裁剪范围一致）。 */
+const RISK_REQUIRED_NUMBER_RANGES = new Map<
+  string,
+  {
+    min: number;
+    max: number;
+    integer?: boolean;
+  }
+>([
+  ["stopWarningPercent", { min: 0.1, max: 20 }],
+  ["hysteresisPercent", { min: 0.01, max: 10 }],
+  // config 明确允许 0（关闭冷却），不能用"必须为正数"的校验。
+  ["cooldownMinutes", { min: 0, max: 1_440, integer: true }]
 ]);
 const RISK_BOOLEAN_FIELDS = new Set(["oncePerDay", "onlyDuringTrading"]);
 
@@ -112,7 +159,8 @@ export function previewProfileImport(
 }
 
 export function hasProfileChanges(diff: ProfileDiff): boolean {
-  return diff.securitiesAdded.length > 0 ||
+  return (
+    diff.securitiesAdded.length > 0 ||
     diff.securitiesUpdated.length > 0 ||
     diff.holdingsAdded.length > 0 ||
     diff.holdingsUpdated.length > 0 ||
@@ -121,7 +169,8 @@ export function hasProfileChanges(diff: ProfileDiff): boolean {
     diff.watchlistUpdated.length > 0 ||
     diff.watchlistRemoved.length > 0 ||
     diff.alertRuleChanges > 0 ||
-    diff.riskSettingsChanged;
+    diff.riskSettingsChanged
+  );
 }
 
 export function exportProfile(settings: UserSettings): string {
@@ -134,7 +183,10 @@ export function exportProfile(settings: UserSettings): string {
     generatedAt: new Date().toISOString(),
     source: "floating-stock-widget",
     securities: settings.securities.filter((security) => referenced.has(security.code)),
-    holdings: settings.holdings.map((holding) => ({ ...holding, alertRules: { ...holding.alertRules } })),
+    holdings: settings.holdings.map((holding) => ({
+      ...holding,
+      alertRules: { ...holding.alertRules }
+    })),
     watchlist: settings.watchlist.map((item) => ({ ...item })),
     riskGroups: settings.risk.groups.map((group) => ({ ...group })),
     risk: {
@@ -162,21 +214,36 @@ export function profilePrompt(): string {
     profileVersion: 1,
     source: "coze",
     securities: [{ code: "000001", market: "SZ", name: "示例股票", alias: "" }],
-    holdings: [{
-      securityCode: "000001", quantity: 100, costPrice: 10.5, groupId: "all",
-      note: "仅保存人工持有逻辑，不由程序解释",
-      alertRules: {
-        enabled: true, stopLossPrice: 9.5, watchPrice: 10,
-        priceAbove: null, priceBelow: null, risePercent: 5, fallPercent: 5,
-        dailyProfitAmount: null, dailyLossAmount: 300,
-        totalProfitAmount: null, totalLossAmount: 500
+    holdings: [
+      {
+        securityCode: "000001",
+        quantity: 100,
+        costPrice: 10.5,
+        groupId: "all",
+        note: "仅保存人工持有逻辑，不由程序解释",
+        alertRules: {
+          enabled: true,
+          stopLossPrice: 9.5,
+          watchPrice: 10,
+          priceAbove: null,
+          priceBelow: null,
+          risePercent: 5,
+          fallPercent: 5,
+          dailyProfitAmount: null,
+          dailyLossAmount: 300,
+          totalProfitAmount: null,
+          totalLossAmount: 500
+        }
       }
-    }],
+    ],
     watchlist: [{ securityCode: "000001", visible: true, order: 0, groupId: "all" }],
     riskGroups: [],
     risk: {
-      mode: "shadow", cooldownMinutes: 15, hysteresisPercent: 0.2,
-      oncePerDay: false, onlyDuringTrading: true,
+      mode: "shadow",
+      cooldownMinutes: 15,
+      hysteresisPercent: 0.2,
+      oncePerDay: false,
+      onlyDuringTrading: true,
       notifications: { widget: true, tray: true, windows: false }
     }
   };
@@ -193,7 +260,10 @@ export function profilePrompt(): string {
 }
 
 function parseProfileJson(text: string, issues: ProfileIssue[]): Record<string, unknown> | null {
-  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
   if (!trimmed) {
     issues.push(error("$", "配置包为空"));
     return null;
@@ -206,7 +276,9 @@ function parseProfileJson(text: string, issues: ProfileIssue[]): Record<string, 
     }
     return parsed;
   } catch (cause) {
-    issues.push(error("$", `JSON 无法解析：${cause instanceof Error ? cause.message : String(cause)}`));
+    issues.push(
+      error("$", `JSON 无法解析：${cause instanceof Error ? cause.message : String(cause)}`)
+    );
     return null;
   }
 }
@@ -231,7 +303,7 @@ function validateProfile(
   }
   const parsed: ParsedProfile = {
     holdingRulePresence: new Set(),
-    hasRuleContent: false
+    touchesRiskSettings: false
   };
   if (raw.securities !== undefined) parsed.securities = validateSecurities(raw.securities, issues);
   const known = new Map(current.securities.map((security) => [security.code, security]));
@@ -246,15 +318,22 @@ function validateProfile(
     const result = validateHoldings(raw.holdings, known, groupIds, issues);
     parsed.holdings = result.items;
     parsed.holdingRulePresence = result.rulePresence;
-    parsed.hasRuleContent ||= result.rulePresence.size > 0;
+    parsed.touchesRiskSettings ||= result.rulePresence.size > 0;
   }
-  if (raw.watchlist !== undefined) parsed.watchlist = validateWatchlist(raw.watchlist, known, groupIds, issues);
+  if (raw.watchlist !== undefined)
+    parsed.watchlist = validateWatchlist(raw.watchlist, known, groupIds, issues);
   if (raw.risk !== undefined) {
     parsed.riskPatch = validateRisk(raw.risk, issues);
-    parsed.hasRuleContent = true;
+    parsed.touchesRiskSettings = true;
   }
-  if (parsed.riskGroups) parsed.hasRuleContent = true;
-  if (!parsed.securities && !parsed.holdings && !parsed.watchlist && !parsed.riskGroups && !parsed.riskPatch) {
+  if (parsed.riskGroups) parsed.touchesRiskSettings = true;
+  if (
+    !parsed.securities &&
+    !parsed.holdings &&
+    !parsed.watchlist &&
+    !parsed.riskGroups &&
+    !parsed.riskPatch
+  ) {
     issues.push(error("$", "配置包没有可导入内容"));
   }
   return parsed;
@@ -265,9 +344,14 @@ function validateSecurities(value: unknown, issues: ProfileIssue[]): Security[] 
     issues.push(error("$.securities", "必须是数组"));
     return [];
   }
+  // 超限必须报错而不是静默截断：此前 120 只会被切成 100 只且不提示，
+  // 随后引用被丢弃代码的持仓还会报出误导性的"必须先在 securities 中定义"。
+  if (value.length > MAX_SECURITIES) {
+    issues.push(error("$.securities", `最多 ${MAX_SECURITIES} 只证券，当前 ${value.length} 只`));
+  }
   const result: Security[] = [];
   const seen = new Set<string>();
-  value.slice(0, 100).forEach((entry, index) => {
+  (value as unknown[]).slice(0, MAX_SECURITIES).forEach((entry, index) => {
     const path = `$.securities[${index}]`;
     if (!isRecord(entry)) return issues.push(error(path, "必须是对象"));
     rejectUnknown(entry, new Set(["code", "market", "name", "alias"]), path, issues);
@@ -276,8 +360,10 @@ function validateSecurities(value: unknown, issues: ProfileIssue[]): Security[] 
     if (seen.has(code)) return issues.push(error(`${path}.code`, "证券代码重复"));
     seen.add(code);
     const inferred = inferMarket(code);
-    const market = entry.market === "SH" || entry.market === "SZ" || entry.market === "BJ"
-      ? entry.market : inferred;
+    const market =
+      entry.market === "SH" || entry.market === "SZ" || entry.market === "BJ"
+        ? entry.market
+        : inferred;
     if (entry.market !== undefined && entry.market !== inferred) {
       issues.push(error(`${path}.market`, `市场与代码不匹配，应为 ${inferred}`));
       return;
@@ -305,21 +391,42 @@ function validateHoldings(
   const items: Holding[] = [];
   const seen = new Set<string>();
   const rulePresence = new Set<string>();
-  value.slice(0, 100).forEach((entry, index) => {
+  if (value.length > MAX_HOLDINGS) {
+    issues.push(error("$.holdings", `最多 ${MAX_HOLDINGS} 条持仓，当前 ${value.length} 条`));
+  }
+  (value as unknown[]).slice(0, MAX_HOLDINGS).forEach((entry, index) => {
     const path = `$.holdings[${index}]`;
     if (!isRecord(entry)) return issues.push(error(path, "必须是对象"));
-    rejectUnknown(entry, new Set([
-      "code", "securityCode", "quantity", "costPrice", "groupId", "note", "alertRules"
-    ]), path, issues);
+    rejectUnknown(
+      entry,
+      new Set(["code", "securityCode", "quantity", "costPrice", "groupId", "note", "alertRules"]),
+      path,
+      issues
+    );
     const code = validCode(entry.securityCode ?? entry.code, `${path}.securityCode`, issues);
     if (!code) return;
-    if (!known.has(code)) return issues.push(error(`${path}.securityCode`, "必须先在 securities 中定义"));
+    if (!known.has(code))
+      return issues.push(error(`${path}.securityCode`, "必须先在 securities 中定义"));
     if (seen.has(code)) return issues.push(error(`${path}.securityCode`, "持仓代码重复"));
     seen.add(code);
-    const quantity = positiveNumber(entry.quantity, `${path}.quantity`, issues, true);
-    const costPrice = positiveNumber(entry.costPrice, `${path}.costPrice`, issues, false);
-    const groupId = typeof entry.groupId === "string" && entry.groupId.trim()
-      ? entry.groupId.trim() : "all";
+    const quantity = positiveNumber(
+      entry.quantity,
+      `${path}.quantity`,
+      issues,
+      true,
+      1,
+      MAX_HOLDING_QUANTITY
+    );
+    const costPrice = positiveNumber(
+      entry.costPrice,
+      `${path}.costPrice`,
+      issues,
+      false,
+      MIN_HOLDING_COST_PRICE,
+      MAX_HOLDING_COST_PRICE
+    );
+    const groupId =
+      typeof entry.groupId === "string" && entry.groupId.trim() ? entry.groupId.trim() : "all";
     if (!groupIds.has(groupId)) issues.push(error(`${path}.groupId`, "风险组不存在"));
     const hasRules = entry.alertRules !== undefined;
     if (hasRules) rulePresence.add(code);
@@ -351,22 +458,33 @@ function validateWatchlist(
   }
   const result: WatchlistMembership[] = [];
   const seen = new Set<string>();
-  value.slice(0, 100).forEach((entry, index) => {
+  if (value.length > MAX_WATCHLIST) {
+    issues.push(error("$.watchlist", `最多50只自选，当前 ${value.length} 只`));
+  }
+  // Array.isArray 会把类型收窄为 any[]；显式收敛为 unknown[] 以免 any 扩散。
+  (value as unknown[]).slice(0, MAX_WATCHLIST).forEach((entry, index) => {
     const path = `$.watchlist[${index}]`;
     const record = typeof entry === "string" ? { securityCode: entry } : entry;
     if (!isRecord(record)) return issues.push(error(path, "必须是代码字符串或对象"));
-    rejectUnknown(record, new Set(["code", "securityCode", "visible", "order", "groupId"]), path, issues);
+    rejectUnknown(
+      record,
+      new Set(["code", "securityCode", "visible", "order", "groupId"]),
+      path,
+      issues
+    );
     const code = validCode(record.securityCode ?? record.code, `${path}.securityCode`, issues);
     if (!code) return;
-    if (!known.has(code)) return issues.push(error(`${path}.securityCode`, "必须先在 securities 中定义"));
+    if (!known.has(code))
+      return issues.push(error(`${path}.securityCode`, "必须先在 securities 中定义"));
     if (seen.has(code)) return issues.push(error(`${path}.securityCode`, "自选代码重复"));
     seen.add(code);
-    const groupId = typeof record.groupId === "string" && record.groupId.trim()
-      ? record.groupId.trim() : "all";
+    const groupId =
+      typeof record.groupId === "string" && record.groupId.trim() ? record.groupId.trim() : "all";
     if (!groupIds.has(groupId)) issues.push(error(`${path}.groupId`, "风险组不存在"));
-    const requestedOrder = record.order === undefined
-      ? result.length
-      : nonNegativeInteger(record.order, `${path}.order`, issues);
+    const requestedOrder =
+      record.order === undefined
+        ? result.length
+        : nonNegativeInteger(record.order, `${path}.order`, issues);
     result.push({
       securityCode: code,
       visible: record.visible !== false,
@@ -374,7 +492,8 @@ function validateWatchlist(
       groupId: groupIds.has(groupId) ? groupId : "all"
     });
   });
-  return result.sort((left, right) => left.order - right.order)
+  return result
+    .sort((left, right) => left.order - right.order)
     .map((item, order) => ({ ...item, order }));
 }
 
@@ -390,24 +509,35 @@ function validateRiskGroups(value: unknown, issues: ProfileIssue[]): RiskSetting
       issues.push(error(path, "必须是对象"));
       return [];
     }
-    rejectUnknown(entry, new Set(["id", "name", "profitThreshold", "lossThreshold", "enabled"]), path, issues);
+    rejectUnknown(
+      entry,
+      new Set(["id", "name", "profitThreshold", "lossThreshold", "enabled"]),
+      path,
+      issues
+    );
     const id = typeof entry.id === "string" ? entry.id.trim() : "";
     if (!/^[a-zA-Z0-9_-]{1,40}$/.test(id) || id === "all" || seen.has(id)) {
       issues.push(error(`${path}.id`, "风险组 ID 无效或重复"));
       return [];
     }
     seen.add(id);
-    return [{
-      id,
-      name: shortText(entry.name, 16, `${path}.name`, issues) || "风险组",
-      profitThreshold: nullablePositive(entry.profitThreshold, `${path}.profitThreshold`, issues),
-      lossThreshold: nullablePositive(entry.lossThreshold, `${path}.lossThreshold`, issues),
-      enabled: entry.enabled !== false
-    }];
+    return [
+      {
+        id,
+        name: shortText(entry.name, 16, `${path}.name`, issues) || "风险组",
+        profitThreshold: nullablePositive(entry.profitThreshold, `${path}.profitThreshold`, issues),
+        lossThreshold: nullablePositive(entry.lossThreshold, `${path}.lossThreshold`, issues),
+        enabled: entry.enabled !== false
+      }
+    ];
   });
 }
 
-function validateAlertRules(value: unknown, path: string, issues: ProfileIssue[]): HoldingAlertRules {
+function validateAlertRules(
+  value: unknown,
+  path: string,
+  issues: ProfileIssue[]
+): HoldingAlertRules {
   if (!isRecord(value)) {
     issues.push(error(path, "必须是对象"));
     return { ...EMPTY_ALERT_RULES };
@@ -421,7 +551,9 @@ function validateAlertRules(value: unknown, path: string, issues: ProfileIssue[]
   for (const key of ALERT_KEYS) {
     if (key === "enabled") continue;
     result[key as keyof Omit<HoldingAlertRules, "enabled">] = nullablePositive(
-      value[key], `${path}.${key}`, issues
+      value[key],
+      `${path}.${key}`,
+      issues
     );
   }
   return result;
@@ -432,7 +564,13 @@ function validateRisk(value: unknown, issues: ProfileIssue[]): RiskPatch {
     issues.push(error("$.risk", "必须是对象"));
     return {};
   }
-  const allowed = new Set(["mode", ...RISK_NUMBER_FIELDS, ...RISK_BOOLEAN_FIELDS, "notifications"]);
+  const allowed = new Set([
+    "mode",
+    ...RISK_NULLABLE_NUMBER_FIELDS,
+    ...RISK_REQUIRED_NUMBER_RANGES.keys(),
+    ...RISK_BOOLEAN_FIELDS,
+    "notifications"
+  ]);
   rejectUnknown(value, allowed, "$.risk", issues);
   const patch: RiskPatch = {};
   if (value.mode !== undefined && value.mode !== "shadow" && value.mode !== "active") {
@@ -442,10 +580,21 @@ function validateRisk(value: unknown, issues: ProfileIssue[]): RiskPatch {
     issues.push(warning("$.risk.mode", "导入不会直接启用正式提醒，已改为影子模式"));
   }
   patch.mode = "shadow";
-  for (const key of RISK_NUMBER_FIELDS) {
+  for (const key of RISK_NULLABLE_NUMBER_FIELDS) {
     if (value[key] === undefined) continue;
-    const parsed = nullablePositive(value[key], `$.risk.${key}`, issues);
-    (patch as Record<string, unknown>)[key] = parsed;
+    (patch as Record<string, unknown>)[key] = nullablePositive(value[key], `$.risk.${key}`, issues);
+  }
+  for (const [key, range] of RISK_REQUIRED_NUMBER_RANGES) {
+    if (value[key] === undefined) continue;
+    const parsed = numberInRange(
+      value[key],
+      `$.risk.${key}`,
+      range.min,
+      range.max,
+      range.integer === true,
+      issues
+    );
+    if (parsed != null) (patch as Record<string, unknown>)[key] = parsed;
   }
   for (const key of RISK_BOOLEAN_FIELDS) {
     if (value[key] === undefined) continue;
@@ -455,7 +604,12 @@ function validateRisk(value: unknown, issues: ProfileIssue[]): RiskPatch {
   if (value.notifications !== undefined) {
     if (!isRecord(value.notifications)) issues.push(error("$.risk.notifications", "必须是对象"));
     else {
-      rejectUnknown(value.notifications, new Set(["widget", "tray", "windows"]), "$.risk.notifications", issues);
+      rejectUnknown(
+        value.notifications,
+        new Set(["widget", "tray", "windows"]),
+        "$.risk.notifications",
+        issues
+      );
       const notifications: Record<string, boolean> = {};
       for (const key of ["widget", "tray", "windows"]) {
         const entry = value.notifications[key];
@@ -477,9 +631,10 @@ function applyParsedProfile(
 ): UserSettings {
   const next = structuredClone(current);
   if (parsed.riskGroups) {
-    next.risk.groups = mode === "replace"
-      ? parsed.riskGroups
-      : mergeBy(next.risk.groups, parsed.riskGroups, (item) => item.id);
+    next.risk.groups =
+      mode === "replace"
+        ? parsed.riskGroups
+        : mergeBy(next.risk.groups, parsed.riskGroups, (item) => item.id);
   }
   if (parsed.securities) {
     next.securities = mergeBy(next.securities, parsed.securities, (item) => item.code);
@@ -490,18 +645,19 @@ function applyParsedProfile(
       const existing = new Map(next.holdings.map((holding) => [holding.securityCode, holding]));
       for (const incoming of parsed.holdings) {
         const previous = existing.get(incoming.securityCode);
-        existing.set(incoming.securityCode, previous && !parsed.holdingRulePresence.has(incoming.securityCode)
-          ? { ...incoming, alertRules: { ...previous.alertRules } }
-          : incoming);
+        existing.set(
+          incoming.securityCode,
+          previous && !parsed.holdingRulePresence.has(incoming.securityCode)
+            ? { ...incoming, alertRules: { ...previous.alertRules } }
+            : incoming
+        );
       }
       next.holdings = [...existing.values()];
     }
   }
   if (parsed.watchlist) {
-    next.watchlist = mode === "replace"
-      ? parsed.watchlist
-      : mergeBy(next.watchlist, parsed.watchlist, (item) => item.securityCode)
-        .map((item, order) => ({ ...item, order }));
+    next.watchlist =
+      mode === "replace" ? parsed.watchlist : mergeWatchlist(next.watchlist, parsed.watchlist);
   }
   if (parsed.riskPatch) {
     const notifications = parsed.riskPatch.notifications
@@ -509,15 +665,21 @@ function applyParsedProfile(
       : next.risk.notifications;
     next.risk = { ...next.risk, ...parsed.riskPatch, notifications };
   }
-  if (parsed.hasRuleContent) {
+  if (parsed.touchesRiskSettings) {
     if (current.risk.mode === "active") {
-      issues.push(warning("$.risk.mode", "导入规则后已强制切换为影子模式，确认无误后再手动启用正式提醒"));
+      issues.push(
+        warning(
+          "$.risk.mode",
+          "导入包含提醒设置，已强制切换为影子模式，确认无误后再手动启用正式提醒"
+        )
+      );
     }
     next.risk.mode = "shadow";
   }
   const knownCodes = new Set(next.securities.map((security) => security.code));
   next.holdings = next.holdings.filter((holding) => knownCodes.has(holding.securityCode));
-  next.watchlist = next.watchlist.filter((item) => knownCodes.has(item.securityCode))
+  next.watchlist = next.watchlist
+    .filter((item) => knownCodes.has(item.securityCode))
     .map((item, order) => ({ ...item, order }));
   for (const tab of next.tabs) {
     tab.securityCodes = tab.securityCodes.filter((code) => knownCodes.has(code));
@@ -536,7 +698,9 @@ function createDiff(before: UserSettings, after: UserSettings): ProfileDiff {
   const afterWatchRows = new Map(after.watchlist.map((item) => [item.securityCode, item]));
   let alertRuleChanges = 0;
   for (const [code, holding] of afterHoldings) {
-    if (JSON.stringify(beforeHoldings.get(code)?.alertRules) !== JSON.stringify(holding.alertRules)) {
+    if (
+      JSON.stringify(beforeHoldings.get(code)?.alertRules) !== JSON.stringify(holding.alertRules)
+    ) {
       alertRuleChanges += 1;
     }
   }
@@ -544,17 +708,24 @@ function createDiff(before: UserSettings, after: UserSettings): ProfileDiff {
   const riskAfter = { ...after.risk, groups: after.risk.groups, mode: after.risk.mode };
   return {
     securitiesAdded: [...afterSecurities.keys()].filter((code) => !beforeSecurities.has(code)),
-    securitiesUpdated: [...afterSecurities.keys()].filter((code) =>
-      beforeSecurities.has(code) && JSON.stringify(beforeSecurities.get(code)) !== JSON.stringify(afterSecurities.get(code))
+    securitiesUpdated: [...afterSecurities.keys()].filter(
+      (code) =>
+        beforeSecurities.has(code) &&
+        JSON.stringify(beforeSecurities.get(code)) !== JSON.stringify(afterSecurities.get(code))
     ),
     holdingsAdded: [...afterHoldings.keys()].filter((code) => !beforeHoldings.has(code)),
-    holdingsUpdated: [...afterHoldings.keys()].filter((code) =>
-      beforeHoldings.has(code) && JSON.stringify(beforeHoldings.get(code)) !== JSON.stringify(afterHoldings.get(code))
+    holdingsUpdated: [...afterHoldings.keys()].filter(
+      (code) =>
+        beforeHoldings.has(code) &&
+        JSON.stringify(beforeHoldings.get(code)) !== JSON.stringify(afterHoldings.get(code))
     ),
     holdingsRemoved: [...beforeHoldings.keys()].filter((code) => !afterHoldings.has(code)),
     watchlistAdded: [...afterWatch].filter((code) => !beforeWatch.has(code)),
-    watchlistUpdated: [...afterWatch].filter((code) => beforeWatch.has(code) &&
-      JSON.stringify(beforeWatchRows.get(code)) !== JSON.stringify(afterWatchRows.get(code))),
+    watchlistUpdated: [...afterWatch].filter(
+      (code) =>
+        beforeWatch.has(code) &&
+        JSON.stringify(beforeWatchRows.get(code)) !== JSON.stringify(afterWatchRows.get(code))
+    ),
     watchlistRemoved: [...beforeWatch].filter((code) => !afterWatch.has(code)),
     alertRuleChanges,
     riskSettingsChanged: JSON.stringify(riskBefore) !== JSON.stringify(riskAfter)
@@ -567,10 +738,30 @@ function mergeBy<T>(current: T[], incoming: T[], key: (item: T) => string): T[] 
   return [...result.values()];
 }
 
+/**
+ * 合并自选：包内出现的代码按包里的顺序排在前面，其余保持原有相对顺序排在后面。
+ *
+ * 之前用的是通用 mergeBy（基于 Map 的插入顺序），已存在代码的 `order` 变更会被丢弃，
+ * 于是"只调整顺序"的包会被判定成 hasChanges=false，报出误导性的"没有差异"。
+ */
+function mergeWatchlist(
+  current: WatchlistMembership[],
+  incoming: WatchlistMembership[]
+): WatchlistMembership[] {
+  const seen = new Set<string>();
+  const merged: WatchlistMembership[] = [];
+  // 先遍历 incoming，命中冲突时以包里的行（包括可见性与别名）为准。
+  for (const item of [...incoming, ...current]) {
+    if (seen.has(item.securityCode)) continue;
+    seen.add(item.securityCode);
+    merged.push(item);
+  }
+  return merged.map((item, order) => ({ ...item, order }));
+}
+
 function inferMarket(code: string): SecurityMarket {
-  if (code.startsWith("6") || code.startsWith("5")) return "SH";
-  if (code.startsWith("0") || code.startsWith("3")) return "SZ";
-  return "BJ";
+  // 与 config.ts 的统一推断保持一致（此前这里有一份规则不同、会拒绝合法 B 股的副本）。
+  return inferSecurityMarket(code);
 }
 
 function validCode(value: unknown, path: string, issues: ProfileIssue[]): string | null {
@@ -583,10 +774,24 @@ function validCode(value: unknown, path: string, issues: ProfileIssue[]): string
 }
 
 function positiveNumber(
-  value: unknown, path: string, issues: ProfileIssue[], integer: boolean
+  value: unknown,
+  path: string,
+  issues: ProfileIssue[],
+  integer: boolean,
+  minimum = Number.MIN_VALUE,
+  maximum = Number.MAX_SAFE_INTEGER
 ): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || integer && !Number.isInteger(value)) {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    (integer && !Number.isInteger(value))
+  ) {
     issues.push(error(path, integer ? "必须是正整数" : "必须是正数"));
+    return null;
+  }
+  if (value < minimum || value > maximum) {
+    issues.push(error(path, `必须在 ${minimum} 与 ${maximum} 之间`));
     return null;
   }
   return value;
@@ -596,6 +801,35 @@ function nullablePositive(value: unknown, path: string, issues: ProfileIssue[]):
   if (value === null || value === undefined || value === "") return null;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     issues.push(error(path, "必须是正数或 null"));
+    return null;
+  }
+  return value;
+}
+
+/** 不可为 null 的数值字段：显式 null 也是错误（RiskSettings 里声明为 number）。 */
+function numberInRange(
+  value: unknown,
+  path: string,
+  minimum: number,
+  maximum: number,
+  integer: boolean,
+  issues: ProfileIssue[]
+): number | null {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < minimum ||
+    value > maximum ||
+    (integer && !Number.isInteger(value))
+  ) {
+    issues.push(
+      error(
+        path,
+        integer
+          ? `必须是 ${minimum}–${maximum} 之间的整数`
+          : `必须是 ${minimum}–${maximum} 之间的数字`
+      )
+    );
     return null;
   }
   return value;
@@ -620,7 +854,10 @@ function shortText(value: unknown, max: number, path: string, issues: ProfileIss
 }
 
 function rejectUnknown(
-  value: Record<string, unknown>, allowed: Set<string>, path: string, issues: ProfileIssue[]
+  value: Record<string, unknown>,
+  allowed: Set<string>,
+  path: string,
+  issues: ProfileIssue[]
 ): void {
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) issues.push(error(`${path}.${key}`, "不支持的字段"));

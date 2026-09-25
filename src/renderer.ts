@@ -1,10 +1,6 @@
 import { importantDriverDecision } from "./domain/news.js";
 import { benchmarkCodeForSecurity, buildDecisionCue } from "./domain/decision.js";
-import type {
-  QuoteField,
-  TabConfig,
-  UserSettings
-} from "./config";
+import type { QuoteField, TabConfig, UserSettings } from "./config";
 import type {
   AppSnapshot,
   DailyCandle,
@@ -15,6 +11,7 @@ import type {
   HoldingRiskMetrics,
   Quote
 } from "./domain/types";
+import { escapeAttr, escapeHtml } from "./presentation/format.js";
 
 const defaultSettings: UserSettings = {
   schemaVersion: 8,
@@ -30,23 +27,47 @@ const defaultSettings: UserSettings = {
   ],
   tabs: [
     {
-      id: "holdings", type: "holdings", title: "持仓", builtIn: true,
-      visible: true, order: 0, securityCodes: [], maxItems: 8,
+      id: "holdings",
+      type: "holdings",
+      title: "持仓",
+      builtIn: true,
+      visible: true,
+      order: 0,
+      securityCodes: [],
+      maxItems: 8,
       newsMode: "watchlist_related"
     },
     {
-      id: "watchlist", type: "watchlist", title: "自选", builtIn: true,
-      visible: true, order: 1, securityCodes: [], maxItems: 20,
+      id: "watchlist",
+      type: "watchlist",
+      title: "自选",
+      builtIn: true,
+      visible: true,
+      order: 1,
+      securityCodes: [],
+      maxItems: 20,
       newsMode: "watchlist_related"
     },
     {
-      id: "market", type: "market", title: "市场", builtIn: true,
-      visible: true, order: 2, securityCodes: [], maxItems: 8,
+      id: "market",
+      type: "market",
+      title: "市场",
+      builtIn: true,
+      visible: true,
+      order: 2,
+      securityCodes: [],
+      maxItems: 8,
       newsMode: "all"
     },
     {
-      id: "drivers", type: "drivers", title: "AI驱动", builtIn: true,
-      visible: true, order: 3, securityCodes: [], maxItems: 5,
+      id: "drivers",
+      type: "drivers",
+      title: "AI驱动",
+      builtIn: true,
+      visible: true,
+      order: 3,
+      securityCodes: [],
+      maxItems: 5,
       newsMode: "important"
     }
   ],
@@ -157,16 +178,36 @@ const emptySnapshot: AppSnapshot = {
   settings: defaultSettings,
   feeds: {
     quotes: {
-      lastSuccessAt: null, dataUpdatedAt: null, lastChangedAt: null,
-      stale: true, stalled: false, source: null,
-      coverage: null, degraded: false, conflictCount: 0,
-      retainedCount: 0, missingCount: 0, alertSafe: false, providerHealth: [], marketState: null
+      lastSuccessAt: null,
+      dataUpdatedAt: null,
+      lastChangedAt: null,
+      stale: true,
+      stalled: false,
+      source: null,
+      coverage: null,
+      degraded: false,
+      conflictCount: 0,
+      retainedCount: 0,
+      missingCount: 0,
+      alertSafe: false,
+      providerHealth: [],
+      marketState: null
     },
     news: {
-      lastSuccessAt: null, dataUpdatedAt: null, lastChangedAt: null,
-      stale: true, stalled: false, source: null,
-      coverage: null, degraded: false, conflictCount: 0,
-      retainedCount: 0, missingCount: 0, alertSafe: false, providerHealth: [], marketState: null
+      lastSuccessAt: null,
+      dataUpdatedAt: null,
+      lastChangedAt: null,
+      stale: true,
+      stalled: false,
+      source: null,
+      coverage: null,
+      degraded: false,
+      conflictCount: 0,
+      retainedCount: 0,
+      missingCount: 0,
+      alertSafe: false,
+      providerHealth: [],
+      marketState: null
     }
   },
   ui: {
@@ -199,21 +240,27 @@ let marketChartMode: "intraday" | "daily" | "boll" = "intraday";
 let marketDetailRequestId = 0;
 let marketDetailRefreshTimer: number | null = null;
 let lastRenderedPageKey = "";
+let copyFeedbackTimer: number | null = null;
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root");
 const rootElement = root;
 
 function render(next: AppSnapshot): void {
-  const previousScroller = rootElement.querySelector<HTMLElement>(".page-body");
-  const previousScrollTop = previousScroller?.scrollTop ?? 0;
+  // 真正的滚动容器是 .scroll-list（styles.css 里 .page-body 是 overflow: hidden，从不滚动），
+  // 而它在下面被 innerHTML 整体替换。合并页同时有行情与新闻两个列表，因此按顺序逐个保存/恢复。
+  const previousScrollTops = [...rootElement.querySelectorAll<HTMLElement>(".scroll-list")].map(
+    (element) => element.scrollTop
+  );
+  if (copyFeedbackTimer != null) {
+    window.clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = null;
+  }
   snapshot = next;
   clickThrough = next.ui.clickThrough;
   applyAppearance(next.settings);
   const tab = resolveActiveTab(next.settings);
-  const pageTitle = marketDetailRequest
-    ? marketDetail?.instrument.name || "走势详情"
-    : tab.title;
+  const pageTitle = marketDetailRequest ? marketDetail?.instrument.name || "走势详情" : tab.title;
   const pageKey = marketDetailRequest
     ? `detail:${marketDetailRequest.kind}:${marketDetailRequest.market}:${marketDetailRequest.code}`
     : tab.id;
@@ -247,16 +294,16 @@ function render(next: AppSnapshot): void {
     </main>
   `;
   if (pageKey === lastRenderedPageKey) {
-    const nextScroller = rootElement.querySelector<HTMLElement>(".page-body");
-    if (nextScroller) nextScroller.scrollTop = previousScrollTop;
+    rootElement.querySelectorAll<HTMLElement>(".scroll-list").forEach((element, index) => {
+      const previous = previousScrollTops[index];
+      if (previous != null) element.scrollTop = previous;
+    });
   }
   lastRenderedPageKey = pageKey;
 }
 
 function resolveActiveTab(settings: UserSettings): TabConfig {
-  const visibleTabs = settings.tabs
-    .filter((tab) => tab.visible)
-    .sort((a, b) => a.order - b.order);
+  const visibleTabs = settings.tabs.filter((tab) => tab.visible).sort((a, b) => a.order - b.order);
   const preferred = settings.navigation.rememberLastTab
     ? settings.navigation.lastActiveTabId
     : settings.navigation.defaultTabId;
@@ -264,13 +311,13 @@ function resolveActiveTab(settings: UserSettings): TabConfig {
   if (!navigationInitialized || !visibleTabs.some((tab) => tab.id === activeTabId)) {
     activeTabId = visibleTabs.some((tab) => tab.id === preferred)
       ? preferred
-      : visibleTabs[0]?.id ?? "watchlist";
+      : (visibleTabs[0]?.id ?? "watchlist");
     navigationInitialized = true;
   }
 
-  return visibleTabs.find((tab) => tab.id === activeTabId)
-    ?? visibleTabs[0]
-    ?? defaultSettings.tabs[1]!;
+  return (
+    visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0] ?? defaultSettings.tabs[1]!
+  );
 }
 
 function renderTabBar(settings: UserSettings, currentId: string): string {
@@ -281,17 +328,25 @@ function renderTabBar(settings: UserSettings, currentId: string): string {
 
   return `
     <nav class="tabs no-drag" aria-label="看盘页面">
-      ${primary.map((tab) => `
+      ${primary
+        .map(
+          (tab) => `
         <button class="tab ${tab.id === currentId ? "active" : ""}" data-action="tab" data-tab-id="${escapeAttr(tab.id)}">
           ${escapeHtml(tab.title)}
         </button>
-      `).join("")}
-      ${overflow.length ? `
+      `
+        )
+        .join("")}
+      ${
+        overflow.length
+          ? `
         <select class="tab-overflow ${overflowActive ? "active" : ""}" data-action="tab-overflow" aria-label="更多页面">
           <option value="">${overflowActive ? escapeHtml(overflowActive.title) : "更多"} ···</option>
           ${overflow.map((tab) => `<option value="${escapeAttr(tab.id)}">${escapeHtml(tab.title)}</option>`).join("")}
         </select>
-      ` : ""}
+      `
+          : ""
+      }
     </nav>
   `;
 }
@@ -309,35 +364,39 @@ function renderPage(tab: TabConfig, next: AppSnapshot): string {
 function renderHoldings(next: AppSnapshot): string {
   const quoteMap = new Map(next.quotes.map((quote) => [quote.code, quote]));
   const riskMap = new Map(next.risk.holdings.map((item) => [item.securityCode, item]));
-  const rows = next.settings.holdings.map((holding) =>
-    renderHoldingRow(
-      holding,
-      quoteMap.get(holding.securityCode),
-      riskMap.get(holding.securityCode),
-      next.settings
+  const rows = next.settings.holdings
+    .map((holding) =>
+      renderHoldingRow(
+        holding,
+        quoteMap.get(holding.securityCode),
+        riskMap.get(holding.securityCode),
+        next.settings
+      )
     )
-  ).join("");
+    .join("");
 
   if (!rows) {
     return `<div class="empty-state"><strong>尚未配置持仓</strong><span>可在设置中填写数量和成本价。</span></div>`;
   }
 
-  const totals = next.settings.holdings.reduce((acc, holding) => {
-    const price = quoteMap.get(holding.securityCode)?.price;
-    if (price == null) return acc;
-    acc.marketValue += price * holding.quantity;
-    acc.costValue += holding.costPrice * holding.quantity;
-    return acc;
-  }, { marketValue: 0, costValue: 0 });
-  const totalProfit = totals.marketValue - totals.costValue;
-  const totalPercent = totals.costValue > 0 ? totalProfit / totals.costValue * 100 : null;
+  // 汇总卡直接使用风险模型（PortfolioRiskMetrics）：任一持仓缺报价时它整体返回 null，
+  // 由格式化函数显示 "--"。此前的局部累加会静默跳过无报价持仓，给出偏小的"确定"数字，
+  // 与下方风险面板的"数据不安全"提示自相矛盾。
+  const portfolio = next.risk.portfolio;
+  // 成本额不依赖行情，可以对全部持仓求和，用于计算累计盈亏百分比。
+  const costValue = next.settings.holdings.reduce(
+    (sum, holding) => sum + holding.costPrice * holding.quantity,
+    0
+  );
+  const totalPercent =
+    portfolio.totalPnl != null && costValue > 0 ? (portfolio.totalPnl / costValue) * 100 : null;
 
   return `
     <div class="holdings-page">
       <div class="portfolio-summary">
-        <span><small>持仓市值</small><strong>${formatMoney(totals.marketValue)}</strong></span>
-        <span class="${numberDirection(next.risk.portfolio.dailyPnl)}"><small>今日盈亏*${formatRLabel(next.risk.portfolio.dailyPnlR)}</small><strong>${formatSignedMoney(next.risk.portfolio.dailyPnl)}</strong></span>
-        <span class="${numberDirection(totalProfit)}"><small>累计盈亏${formatRLabel(next.risk.portfolio.totalPnlR)}</small><strong>${formatSignedMoney(totalProfit)} / ${formatPercent(totalPercent)}</strong></span>
+        <span><small>持仓市值</small><strong>${formatMoney(portfolio.marketValue)}</strong></span>
+        <span class="${numberDirection(portfolio.dailyPnl)}"><small>今日盈亏*${formatRLabel(portfolio.dailyPnlR)}</small><strong>${formatSignedMoney(portfolio.dailyPnl)}</strong></span>
+        <span class="${numberDirection(portfolio.totalPnl)}"><small>累计盈亏${formatRLabel(portfolio.totalPnlR)}</small><strong>${formatSignedMoney(portfolio.totalPnl)} / ${formatPercent(totalPercent)}</strong></span>
         ${next.settings.holdings.length ? '<p class="pnl-note">* 当日有买卖时，今日盈亏仅供参考</p>' : ""}
       </div>
       ${renderRiskStatus(next)}
@@ -354,8 +413,11 @@ function renderHoldingRow(
 ): string {
   const security = securityFor(settings, holding.securityCode);
   const price = quote?.price;
-  const profit = price == null ? null : (price - holding.costPrice) * holding.quantity;
-  const profitPercent = price == null ? null : (price - holding.costPrice) / holding.costPrice * 100;
+  // 累计盈亏直接用风险模型的指标：它用 finitePositive 清洗过价格，且数据不安全时整体为
+  // null（显示 "--"），与风险面板/汇总卡口径一致。此前这里拿原始 quote.price 自行相除，
+  // 今天能和风险面板对上只是因为上游不变量，属于潜在漂移。
+  const profit = risk?.totalPnl ?? null;
+  const profitPercent = risk?.totalPnlPercent ?? null;
   const dailyDirection = quoteDirection(quote);
 
   return `
@@ -380,9 +442,9 @@ function renderQuoteList(codes: string[], next: AppSnapshot): string {
     return `<div class="empty-state"><strong>这个页面还没有股票</strong><span>在设置中添加或选择股票。</span></div>`;
   }
 
-  return `<div class="scroll-list quote-list">${
-    orderedCodes.map((code) => renderQuote(code, quoteMap.get(code), next.settings)).join("")
-  }</div>`;
+  return `<div class="scroll-list quote-list">${orderedCodes
+    .map((code) => renderQuote(code, quoteMap.get(code), next.settings))
+    .join("")}</div>`;
 }
 
 function renderRiskStatus(next: AppSnapshot): string {
@@ -405,9 +467,11 @@ function renderHoldingRiskHint(risk: HoldingRiskMetrics | undefined): string {
   if (!risk) return "";
   if (!risk.dataSafe) return ' <em class="risk-badge unsafe">停用</em>';
   const breach = risk.violations.find((item) => item.severity === "breach");
-  if (breach) return ` <em class="risk-badge breach" title="${escapeAttr(breach.message)}">越线</em>`;
+  if (breach)
+    return ` <em class="risk-badge breach" title="${escapeAttr(breach.message)}">越线</em>`;
   const warning = risk.violations[0];
-  if (warning) return ` <em class="risk-badge warning" title="${escapeAttr(warning.message)}">预警</em>`;
+  if (warning)
+    return ` <em class="risk-badge warning" title="${escapeAttr(warning.message)}">预警</em>`;
   return "";
 }
 function renderCombined(next: AppSnapshot, tab: TabConfig): string {
@@ -422,11 +486,12 @@ function renderCombined(next: AppSnapshot, tab: TabConfig): string {
   `;
 }
 
-
-
 function renderMarketOverview(market: AppSnapshot["market"]): string {
   if (market.indices.length === 0) {
-    const message = market.errors.length > 0 ? "市场数据暂不可用，实时行情不受影响。" : "正在加载指数和市场宽度。";
+    const message =
+      market.errors.length > 0
+        ? "市场数据暂不可用，实时行情不受影响。"
+        : "正在加载指数和市场宽度。";
     return `<div class="empty-state"><strong>市场概览加载中</strong><span>${message}</span></div>`;
   }
 
@@ -442,13 +507,17 @@ function renderMarketOverview(market: AppSnapshot["market"]): string {
         <span><small>两市额</small><strong>${formatMarketAmount(breadth.amount)}</strong></span>
       </div>
       <div class="market-index-grid">
-        ${market.indices.map((item) => `
+        ${market.indices
+          .map(
+            (item) => `
           <button class="market-index ${numberDirection(item.changePercent)}" data-action="market-detail" data-kind="index" data-market="${item.instrument.market}" data-code="${item.instrument.code}">
             <span>${escapeHtml(shortIndexName(item.instrument.name))}</span>
             <strong>${formatNumber(item.price)}</strong>
             <em>${formatPercent(item.changePercent)}</em>
           </button>
-        `).join("")}
+        `
+          )
+          .join("")}
       </div>
       <section class="market-preview">
         <div class="section-caption"><span>上证分时</span><em>${dataSourceLabel(market.intraday.source)}${market.intraday.stale ? " · 缓存" : ""}</em></div>
@@ -457,9 +526,16 @@ function renderMarketOverview(market: AppSnapshot["market"]): string {
       <section class="market-sectors">
         <div class="section-caption"><span>领涨行业</span><em>${state} · ${dataSourceLabel(market.source)}</em></div>
         <div class="sector-list">
-          ${market.sectors.slice(0, 5).map((item) => `
+          ${
+            market.sectors
+              .slice(0, 5)
+              .map(
+                (item) => `
             <span class="sector-chip ${numberDirection(item.changePercent)}"><b>${escapeHtml(item.name)}</b><em>${formatPercent(item.changePercent)}</em></span>
-          `).join("") || "<span class=\"sector-empty\">行业数据暂不可用</span>"}
+          `
+              )
+              .join("") || '<span class="sector-empty">行业数据暂不可用</span>'
+          }
         </div>
       </section>
     </div>
@@ -495,9 +571,11 @@ function renderMarketDetail(): string {
         ${chartModeButton("boll", "BOLL")}
       </div>
       <section class="detail-chart">
-        ${marketChartMode === "intraday"
-          ? renderIntradayChart(marketDetail.intraday, false)
-          : renderCandleChart(marketDetail.daily, marketChartMode === "boll")}
+        ${
+          marketChartMode === "intraday"
+            ? renderIntradayChart(marketDetail.intraday, false)
+            : renderCandleChart(marketDetail.daily, marketChartMode === "boll")
+        }
       </section>
       ${renderMarketDetailStats(marketDetail)}
       ${series.error ? `<div class="chart-warning">${escapeHtml(series.error)}</div>` : ""}
@@ -509,10 +587,7 @@ function chartModeButton(mode: "intraday" | "daily" | "boll", label: string): st
   return `<button class="${marketChartMode === mode ? "active" : ""}" data-action="chart-mode" data-mode="${mode}">${label}</button>`;
 }
 
-function renderIntradayChart(
-  series: MarketSeries<IntradayPoint>,
-  compact: boolean
-): string {
+function renderIntradayChart(series: MarketSeries<IntradayPoint>, compact: boolean): string {
   const items = series.items.filter((item) => Number.isFinite(item.price));
   if (items.length === 0) return `<div class="chart-empty">暂无分时数据</div>`;
   const width = 340;
@@ -520,19 +595,24 @@ function renderIntradayChart(
   const top = 10;
   const bottom = compact ? 8 : 24;
   const prices = items.map((item) => item.price);
-  const averages = items.flatMap((item) => item.average == null ? [] : [item.average]);
+  const averages = items.flatMap((item) => (item.average == null ? [] : [item.average]));
   const low = Math.min(...prices, ...averages);
   const high = Math.max(...prices, ...averages);
   const padding = Math.max((high - low) * 0.08, Math.abs(high) * 0.001, 0.01);
   const min = low - padding;
   const max = high + padding;
   const chartHeight = height - top - bottom;
-  const x = (index: number) => items.length === 1 ? width / 2 : index / (items.length - 1) * width;
-  const y = (value: number) => top + (max - value) / (max - min || 1) * chartHeight;
-  const pricePoints = items.map((item, index) => `${x(index).toFixed(1)},${y(item.price).toFixed(1)}`).join(" ");
-  const averagePoints = items.flatMap((item, index) =>
-    item.average == null ? [] : [`${x(index).toFixed(1)},${y(item.average).toFixed(1)}`]
-  ).join(" ");
+  const x = (index: number) =>
+    items.length === 1 ? width / 2 : (index / (items.length - 1)) * width;
+  const y = (value: number) => top + ((max - value) / (max - min || 1)) * chartHeight;
+  const pricePoints = items
+    .map((item, index) => `${x(index).toFixed(1)},${y(item.price).toFixed(1)}`)
+    .join(" ");
+  const averagePoints = items
+    .flatMap((item, index) =>
+      item.average == null ? [] : [`${x(index).toFixed(1)},${y(item.average).toFixed(1)}`]
+    )
+    .join(" ");
   const firstTime = formatTime(items[0]!.time);
   const lastTime = formatTime(items.at(-1)!.time);
   return `
@@ -562,23 +642,28 @@ function renderCandleChart(series: MarketSeries<DailyCandle>, showBoll: boolean)
   ]);
   const min = Math.min(...rangeValues);
   const max = Math.max(...rangeValues);
-  const y = (value: number) => priceTop + (max - value) / (max - min || 1) * (priceBottom - priceTop);
+  const y = (value: number) =>
+    priceTop + ((max - value) / (max - min || 1)) * (priceBottom - priceTop);
   const step = width / items.length;
   const candleWidth = Math.max(2, Math.min(5, step * 0.62));
   const maxVolume = Math.max(...items.map((item) => item.volume), 1);
   const x = (index: number) => step * index + step / 2;
-  const candles = items.map((item, index) => {
-    const direction = item.close >= item.open ? "up" : "down";
-    const bodyTop = y(Math.max(item.open, item.close));
-    const bodyBottom = y(Math.min(item.open, item.close));
-    const volumeHeight = item.volume / maxVolume * (volumeBottom - volumeTop);
-    return `<g class="candle ${direction}"><line x1="${x(index)}" x2="${x(index)}" y1="${y(item.high)}" y2="${y(item.low)}"/><rect x="${x(index) - candleWidth / 2}" y="${bodyTop}" width="${candleWidth}" height="${Math.max(1, bodyBottom - bodyTop)}"/><rect class="volume" x="${x(index) - candleWidth / 2}" y="${volumeBottom - volumeHeight}" width="${candleWidth}" height="${Math.max(1, volumeHeight)}"/></g>`;
-  }).join("");
-  const boll = showBoll ? [
-    bollPolyline(items, "bollUpper", x, y, "boll-upper"),
-    bollPolyline(items, "bollMid", x, y, "boll-mid"),
-    bollPolyline(items, "bollLower", x, y, "boll-lower")
-  ].join("") : "";
+  const candles = items
+    .map((item, index) => {
+      const direction = item.close >= item.open ? "up" : "down";
+      const bodyTop = y(Math.max(item.open, item.close));
+      const bodyBottom = y(Math.min(item.open, item.close));
+      const volumeHeight = (item.volume / maxVolume) * (volumeBottom - volumeTop);
+      return `<g class="candle ${direction}"><line x1="${x(index)}" x2="${x(index)}" y1="${y(item.high)}" y2="${y(item.low)}"/><rect x="${x(index) - candleWidth / 2}" y="${bodyTop}" width="${candleWidth}" height="${Math.max(1, bodyBottom - bodyTop)}"/><rect class="volume" x="${x(index) - candleWidth / 2}" y="${volumeBottom - volumeHeight}" width="${candleWidth}" height="${Math.max(1, volumeHeight)}"/></g>`;
+    })
+    .join("");
+  const boll = showBoll
+    ? [
+        bollPolyline(items, "bollUpper", x, y, "boll-upper"),
+        bollPolyline(items, "bollMid", x, y, "boll-mid"),
+        bollPolyline(items, "bollLower", x, y, "boll-lower")
+      ].join("")
+    : "";
   return `
     <svg class="market-chart candle-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-label="${showBoll ? "布林线日K图" : "日K图"}">
       <line class="chart-grid" x1="0" x2="${width}" y1="${priceBottom}" y2="${priceBottom}" />
@@ -599,9 +684,11 @@ function bollPolyline(
   y: (value: number) => number,
   className: string
 ): string {
-  const points = items.flatMap((item, index) =>
-    item[field] == null ? [] : [`${x(index).toFixed(1)},${y(item[field]!).toFixed(1)}`]
-  ).join(" ");
+  const points = items
+    .flatMap((item, index) =>
+      item[field] == null ? [] : [`${x(index).toFixed(1)},${y(item[field]!).toFixed(1)}`]
+    )
+    .join(" ");
   return points ? `<polyline class="boll-line ${className}" points="${points}" />` : "";
 }
 
@@ -610,7 +697,7 @@ function renderMarketDetailStats(detail: MarketDetail): string {
     const items = detail.intraday.items;
     const first = items[0]?.price;
     const latest = items.at(-1)?.price;
-    const change = first && latest ? (latest - first) / first * 100 : null;
+    const change = first && latest ? ((latest - first) / first) * 100 : null;
     return `<div class="chart-stats"><span><small>最新</small><strong>${formatNumber(latest)}</strong></span><span class="${numberDirection(change)}"><small>分时变化</small><strong>${formatPercent(change)}</strong></span><span><small>数据点</small><strong>${items.length}</strong></span></div>`;
   }
   const latest = detail.daily.items.at(-1);
@@ -705,9 +792,9 @@ function renderNews(next: AppSnapshot, maxItems: number, mode: TabConfig["newsMo
     ...next.settings.watchlist.map((item) => item.securityCode)
   ]);
   const items = next.news
-    .filter((item) =>
-      mode !== "important" ||
-      importantDriverDecision(item, item.analysis, trackedCodes).display
+    .filter(
+      (item) =>
+        mode !== "important" || importantDriverDecision(item, item.analysis, trackedCodes).display
     )
     .slice(0, maxItems);
   const hasAi = items.some((item) => item.analysis?.provider === "ai");
@@ -718,9 +805,10 @@ function renderNews(next: AppSnapshot, maxItems: number, mode: TabConfig["newsMo
       : "本地规则";
 
   if (items.length === 0) {
-    const detail = next.ai.enabled && !next.ai.configured
-      ? "未配置 API Key；当前只使用本地规则。"
-      : "没有高价值事件时保持安静。";
+    const detail =
+      next.ai.enabled && !next.ai.configured
+        ? "未配置 API Key；当前只使用本地规则。"
+        : "没有高价值事件时保持安静。";
     return `
       <div class="empty-state">
         <strong>暂无重要驱动</strong>
@@ -735,17 +823,19 @@ function renderNews(next: AppSnapshot, maxItems: number, mode: TabConfig["newsMo
       <em>${escapeHtml(analyzer)}</em>
     </div>
     <div class="scroll-list news-list driver-list">
-      ${items.map((item) => {
-        const analysis = item.analysis;
-        const cue = decisionCueForItem(item, next);
-        const related = analysis?.relatedCodes.length
-          ? analysis.relatedCodes.join(" · ")
-          : "未确认标的";
-        const materialLimited = analysis?.materialLimited === true;
-        const failure = analysis?.provider === "rules" && analysis.failureReason
-          ? `降级：${analysis.failureReason}`
-          : "";
-        return `
+      ${items
+        .map((item) => {
+          const analysis = item.analysis;
+          const cue = decisionCueForItem(item, next);
+          const related = analysis?.relatedCodes.length
+            ? analysis.relatedCodes.join(" · ")
+            : "未确认标的";
+          const materialLimited = analysis?.materialLimited === true;
+          const failure =
+            analysis?.provider === "rules" && analysis.failureReason
+              ? `降级：${analysis.failureReason}`
+              : "";
+          return `
           <article class="news-item driver-card priority-${analysis?.priority ?? "low"} direction-${analysis?.direction ?? "neutral"}" data-url="${escapeAttr(item.url)}" title="${escapeAttr(item.title)}">
             <span class="news-time">${formatTime(item.publishedAt)}</span>
             <span class="driver-heading">
@@ -755,9 +845,11 @@ function renderNews(next: AppSnapshot, maxItems: number, mode: TabConfig["newsMo
             <span class="driver-meta">
               ${escapeHtml(sourceLabel(item.source))}
               · ${escapeHtml(sourceTierLabel(item.sourceTier))}
-              ${item.documentCount && item.documentCount > 1
-                ? ` · 已合并 ${item.documentCount} 份材料`
-                : ""}
+              ${
+                item.documentCount && item.documentCount > 1
+                  ? ` · 已合并 ${item.documentCount} 份材料`
+                  : ""
+              }
               · ${escapeHtml(related)}
               · ${escapeHtml(relationLabel(analysis))}
               · ${escapeHtml(eventTypeLabel(analysis?.eventType))}
@@ -777,15 +869,13 @@ function renderNews(next: AppSnapshot, maxItems: number, mode: TabConfig["newsMo
             ${failure ? `<span class="driver-fallback">${escapeHtml(failure)}</span>` : ""}
           </article>
         `;
-      }).join("")}
+        })
+        .join("")}
     </div>
   `;
 }
 
-function decisionCueForItem(
-  item: AppSnapshot["news"][number],
-  next: AppSnapshot
-) {
+function decisionCueForItem(item: AppSnapshot["news"][number], next: AppSnapshot) {
   const holdingCodes = new Set(next.settings.holdings.map((holding) => holding.securityCode));
   const watchlistCodes = new Set(next.settings.watchlist.map((entry) => entry.securityCode));
   const preliminary = buildDecisionCue({
@@ -802,10 +892,14 @@ function decisionCueForItem(
     : undefined;
   const benchmarkCode = benchmarkCodeForSecurity(preliminary.relatedCode ?? "600000");
   const benchmark = next.market.indices.find((entry) => entry.instrument.code === benchmarkCode);
-  const recentRuleTriggered = Boolean(preliminary.relatedCode && next.risk.recentEvents.some((event) =>
-    event.securityCode === preliminary.relatedCode &&
-    Date.now() - Date.parse(event.triggeredAt) <= 30 * 60_000
-  ));
+  const recentRuleTriggered = Boolean(
+    preliminary.relatedCode &&
+    next.risk.recentEvents.some(
+      (event) =>
+        event.securityCode === preliminary.relatedCode &&
+        Date.now() - Date.parse(event.triggeredAt) <= 30 * 60_000
+    )
+  );
   return buildDecisionCue({
     item,
     analysis: item.analysis,
@@ -836,19 +930,19 @@ function eventTypeLabel(value: string | undefined): string {
     market: "市场",
     other: "其他"
   };
-  return value ? labels[value] ?? "其他" : "未分类";
+  return value ? (labels[value] ?? "其他") : "未分类";
 }
 
-function relationLabel(
-  analysis: AppSnapshot["news"][number]["analysis"]
-): string {
+function relationLabel(analysis: AppSnapshot["news"][number]["analysis"]): string {
   if (!analysis) return "关联待确认";
   if (analysis.relation === "direct" && analysis.sourceRelatedCodes.length) {
     return "正文直接关联";
   }
-  if (analysis.relation === "industry" &&
-      analysis.inferredRelatedCodes.length &&
-      !analysis.sourceRelatedCodes.length) {
+  if (
+    analysis.relation === "industry" &&
+    analysis.inferredRelatedCodes.length &&
+    !analysis.sourceRelatedCodes.length
+  ) {
     return "AI推测行业关联";
   }
   if (analysis.relation === "industry") return "行业关联";
@@ -879,15 +973,14 @@ function horizonLabel(value: string | undefined): string {
     medium: "中期",
     long: "长期"
   };
-  return value ? labels[value] ?? "周期待定" : "周期待定";
+  return value ? (labels[value] ?? "周期待定") : "周期待定";
 }
 
 function renderQuote(code: string, quote: Quote | undefined, settings: UserSettings): string {
   const security = securityFor(settings, code);
   const displayName = security?.alias || security?.name || quote?.name || code;
-  const detailName = security?.alias && (security.name || quote?.name)
-    ? (security.name || quote?.name) + " · "
-    : "";
+  const detailName =
+    security?.alias && (security.name || quote?.name) ? (security.name || quote?.name) + " · " : "";
   const direction = quoteDirection(quote);
 
   return `
@@ -923,15 +1016,17 @@ function sortCodes(codes: string[], quotes: Quote[], settings: UserSettings): st
   const unique = [...new Set(codes)];
   const quoteMap = new Map(quotes.map((quote) => [quote.code, quote]));
   if (settings.quotes.sort === "changePercentDesc") {
-    return unique.sort((a, b) =>
-      (quoteMap.get(b)?.changePercent ?? -Infinity) -
-      (quoteMap.get(a)?.changePercent ?? -Infinity)
+    return unique.sort(
+      (a, b) =>
+        (quoteMap.get(b)?.changePercent ?? -Infinity) -
+        (quoteMap.get(a)?.changePercent ?? -Infinity)
     );
   }
   if (settings.quotes.sort === "changePercentAbs") {
-    return unique.sort((a, b) =>
-      Math.abs(quoteMap.get(b)?.changePercent ?? 0) -
-      Math.abs(quoteMap.get(a)?.changePercent ?? 0)
+    return unique.sort(
+      (a, b) =>
+        Math.abs(quoteMap.get(b)?.changePercent ?? 0) -
+        Math.abs(quoteMap.get(a)?.changePercent ?? 0)
     );
   }
   return unique;
@@ -949,7 +1044,13 @@ function applyAppearance(settings: UserSettings): void {
   );
 }
 
-rootElement.addEventListener("click", async (event) => {
+// 事件回调必须返回 void：把异步逻辑放进具名函数，并用 void 显式标记忽略返回的 Promise，
+// 否则既触发 no-misused-promises，也会让 rejection 变成无人处理的悬挂 Promise。
+rootElement.addEventListener("click", (event) => {
+  void handleRootClick(event);
+});
+
+async function handleRootClick(event: MouseEvent): Promise<void> {
   const control = (event.target as HTMLElement).closest<HTMLElement>("[data-action], [data-url]");
   if (!control) return;
 
@@ -1000,8 +1101,15 @@ rootElement.addEventListener("click", async (event) => {
   }
 
   if (control.dataset.action === "click-through") {
-    clickThrough = !clickThrough;
-    await window.floatingStock?.toggleClickThrough(clickThrough);
+    const requested = !clickThrough;
+    clickThrough = requested;
+    try {
+      await window.floatingStock?.toggleClickThrough(requested);
+    } catch {
+      // 回滚乐观更新，避免按钮 aria-pressed 与实际点击穿透状态不一致。
+      clickThrough = !requested;
+      render(snapshot);
+    }
     return;
   }
   if (control.dataset.action === "copy-news-context" && control.dataset.eventId) {
@@ -1012,20 +1120,30 @@ rootElement.addEventListener("click", async (event) => {
     } catch {
       control.textContent = "复制失败";
     }
-    window.setTimeout(() => { control.textContent = original; }, 1_500);
+    // 保存句柄：下一次 render() 会替换该节点，必须先取消定时器，
+    // 否则回调会写到一个已脱离文档的元素上（用户看不到任何变化）。
+    if (copyFeedbackTimer != null) window.clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = window.setTimeout(() => {
+      copyFeedbackTimer = null;
+      control.textContent = original;
+    }, 1_500);
     return;
   }
 
   const url = control.dataset.url;
   if (url) await window.floatingStock?.openExternal(url);
+}
+
+rootElement.addEventListener("change", (event) => {
+  void handleRootChange(event);
 });
 
-rootElement.addEventListener("change", async (event) => {
+async function handleRootChange(event: Event): Promise<void> {
   const select = event.target as HTMLSelectElement;
   if (select.dataset.action === "tab-overflow" && select.value) {
     await activateTab(select.value);
   }
-});
+}
 
 async function activateTab(tabId: string): Promise<void> {
   closeMarketDetail(false);
@@ -1093,8 +1211,8 @@ function renderFeedStatus(label: string, status: AppSnapshot["feeds"]["quotes"])
   const staleClass = status.stale || status.stalled || status.degraded ? "stale" : "";
   const stateText = states.length > 0 ? " · " + states.join("/") : "";
   const providerDetails = (status.providerHealth ?? []).map((health) => {
-    const circuit = health.circuitState === "closed" ? "正常" :
-      health.circuitState === "open" ? "熔断" : "探测";
+    const circuit =
+      health.circuitState === "closed" ? "正常" : health.circuitState === "open" ? "熔断" : "探测";
     const p50 = health.latencyP50Ms == null ? "--" : `${health.latencyP50Ms}ms`;
     const p95 = health.latencyP95Ms == null ? "--" : `${health.latencyP95Ms}ms`;
     return `${sourceLabels[health.provider] ?? health.provider} 成功${Math.round(health.successRate * 100)}% 完整${Math.round(health.completenessRate * 100)}% 新鲜${Math.round(health.freshnessRate * 100)}% P50/P95 ${p50}/${p95} 解析失败${Math.round(health.parseFailureRate * 100)}% 差异${Math.round(health.conflictRate * 100)}% ${circuit}`;
@@ -1102,7 +1220,9 @@ function renderFeedStatus(label: string, status: AppSnapshot["feeds"]["quotes"])
   const details = [
     `最近可信 ${formatFeedTime(status.lastSuccessAt)}`,
     status.dataUpdatedAt ? `源数据 ${formatFeedTime(status.dataUpdatedAt)}` : "源数据时间未知",
-    status.lastChangedAt ? `数值变化 ${formatFeedTime(status.lastChangedAt)}` : "尚未检测到数值变化",
+    status.lastChangedAt
+      ? `数值变化 ${formatFeedTime(status.lastChangedAt)}`
+      : "尚未检测到数值变化",
     `价格提醒${status.alertSafe ? "可用" : "已禁用"}`,
     ...providerDetails
   ].join("；");
@@ -1167,20 +1287,19 @@ function formatMoney(value: number | null | undefined): string {
 
 function formatSignedMoney(value: number | null | undefined): string {
   if (value == null) return "--";
-  return (value > 0 ? "+" : "") + new Intl.NumberFormat("zh-CN", {
-    maximumFractionDigits: 0
-  }).format(value);
+  return (
+    (value > 0 ? "+" : "") +
+    new Intl.NumberFormat("zh-CN", {
+      maximumFractionDigits: 0
+    }).format(value)
+  );
 }
 
 function formatQuantity(value: number): string {
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(value);
 }
 
-function formatCompact(
-  value: number | null | undefined,
-  suffix: string,
-  signed = false
-): string {
+function formatCompact(value: number | null | undefined, suffix: string, signed = false): string {
   if (value == null) return "--";
   const absolute = Math.abs(value);
   const sign = signed && value > 0 ? "+" : value < 0 ? "-" : "";
@@ -1200,7 +1319,6 @@ function formatFeedTime(value: string): string {
   }).format(date);
 }
 
-
 function formatTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--:--";
@@ -1209,16 +1327,4 @@ function formatTime(value: string): string {
     minute: "2-digit",
     hour12: false
   }).format(date);
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function escapeAttr(value: string): string {
-  return escapeHtml(value).replaceAll("'", "&#39;");
 }

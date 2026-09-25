@@ -18,10 +18,7 @@ import { parse as parseDotEnv } from "dotenv";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  CachedNewsAnalyzer,
-  JsonNewsAnalysisCache
-} from "../src/ai/batch.js";
+import { CachedNewsAnalyzer, JsonNewsAnalysisCache } from "../src/ai/batch.js";
 import { EncryptedApiKeyStore } from "../src/ai/credentials.js";
 import {
   analyzeNewsBatch,
@@ -30,7 +27,6 @@ import {
 } from "../src/ai/openaiCompatible.js";
 import {
   activeSecurityCodes,
-  loadAppConfigFromObject,
   preserveRuntimeSecrets,
   toUserSettings,
   type AiSettings,
@@ -47,6 +43,7 @@ import {
   instrumentKey
 } from "../src/domain/market.js";
 import { aggregateNewsSource } from "../src/domain/news.js";
+import type { AlertEvent } from "../src/domain/types.js";
 import { buildTrayPresentation, type TrayVisualState } from "../src/domain/trayStatus.js";
 import {
   buildAlertCandidates,
@@ -62,7 +59,8 @@ import {
 } from "../src/domain/runtimeSecurity.js";
 import {
   getAShareMarketState,
-  isAShareTradingSession
+  isAShareTradingSession,
+  isTradingCalendarVerified
 } from "../src/domain/marketClock.js";
 import {
   FAST_INDEX_INTERVAL_MS,
@@ -91,10 +89,7 @@ import type {
 import { AlertEngine, JsonAlertStateStore } from "../src/services/alerts.js";
 import { JsonMarketCache, MarketDataCoordinator } from "../src/services/marketData.js";
 import { NewsDataCoordinator } from "../src/services/newsData.js";
-import {
-  openRecoveringNewsEventStore,
-  SqliteNewsEventStore
-} from "../src/services/newsEvents.js";
+import { openRecoveringNewsEventStore, SqliteNewsEventStore } from "../src/services/newsEvents.js";
 import { QuoteCoordinator } from "../src/services/quotes.js";
 import { createSingleFlight } from "../src/services/singleFlight.js";
 import { LocalWorkWebServer } from "../src/services/localWeb.js";
@@ -118,8 +113,7 @@ const LOCAL_RENDERER_URLS = [
   SETTINGS_RENDERER_PATH,
   QUICK_RENDERER_PATH,
   EXCEL_RENDERER_PATH
-]
-  .map((entry) => pathToFileURL(entry).toString());
+].map((entry) => pathToFileURL(entry).toString());
 const ALLOWED_ENV_KEYS = ["AI_API_KEY", "AI_API_BASE_URL", "AI_MODEL"] as const;
 const APP_ICON_PATH = path.join(__dirname, "../../resources/icons/app-256.png");
 const TRAY_ICON_PATH = path.join(__dirname, "../../resources/icons/tray.png");
@@ -368,8 +362,8 @@ function openExcelWorkspace(): void {
   excelWindow.show();
   excelWindow.moveTop();
   excelWindow.focus();
-  void refreshQuotesNow?.();
-  void refreshFastIndices();
+  triggerRefresh("quotes", refreshQuotesNow);
+  triggerRefresh("indices", refreshFastIndices);
 }
 
 async function openLocalWorkWeb(): Promise<void> {
@@ -435,8 +429,7 @@ function createTray(): void {
 
 function updateTrayMenu(): void {
   if (!tray || !config) return;
-  const bossKeyLabel = showHideShortcut ||
-    (config.window.bossKeyEnabled ? "注册失败" : "未启用");
+  const bossKeyLabel = showHideShortcut || (config.window.bossKeyEnabled ? "注册失败" : "未启用");
   const latestAlert = latestRisk.recentEvents[0];
   const alertMode = config.risk.mode === "shadow" ? "影子模式" : "正式提醒";
   const presentation = buildTrayPresentation(snapshot());
@@ -538,9 +531,9 @@ function createTrayStateIcon(state: TrayVisualState): Electron.NativeImage {
     degraded: "#7c3aed"
   };
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="3" fill="${colors[state]}"/><path d="M4 10.5h2V7H4zm3 0h2V4.5H7zm3 0h2V6h-2z" fill="white" opacity=".92"/></svg>`;
-  const dynamic = nativeImage.createFromDataURL(
-    `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
-  ).resize({ width: 16, height: 16, quality: "best" });
+  const dynamic = nativeImage
+    .createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`)
+    .resize({ width: 16, height: 16, quality: "best" });
   return dynamic.isEmpty()
     ? nativeImage.createFromPath(TRAY_ICON_PATH).resize({ width: 16, height: 16 })
     : dynamic;
@@ -578,10 +571,7 @@ function applyBossKeyRegistration(next: WindowSettings): void {
   }
   showHideShortcut = shortcut;
 }
-function registerFirstAvailableShortcut(
-  candidates: string[],
-  handler: () => void
-): string {
+function registerFirstAvailableShortcut(candidates: string[], handler: () => void): string {
   for (const shortcut of candidates) {
     if (globalShortcut.register(shortcut, handler)) return shortcut;
   }
@@ -590,8 +580,14 @@ function registerFirstAvailableShortcut(
 }
 
 function scheduleWindowBoundsSave(window: BrowserWindow): void {
-  if (config.window.locked || window.isDestroyed() ||
-      window.isMaximized() || window.isFullScreen() || window.isMinimized()) return;
+  if (
+    config.window.locked ||
+    window.isDestroyed() ||
+    window.isMaximized() ||
+    window.isFullScreen() ||
+    window.isMinimized()
+  )
+    return;
   if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
   boundsSaveTimer = setTimeout(() => {
     boundsSaveTimer = null;
@@ -600,15 +596,26 @@ function scheduleWindowBoundsSave(window: BrowserWindow): void {
 }
 
 async function persistWindowBounds(window: BrowserWindow): Promise<void> {
-  if (isQuitting || config.window.locked || window.isDestroyed() ||
-      window.isMaximized() || window.isFullScreen() || window.isMinimized()) return;
+  if (
+    isQuitting ||
+    config.window.locked ||
+    window.isDestroyed() ||
+    window.isMaximized() ||
+    window.isFullScreen() ||
+    window.isMinimized()
+  )
+    return;
   if (settingsSaveInProgress) {
     scheduleWindowBoundsSave(window);
     return;
   }
   const bounds = window.getBounds();
-  if (config.window.x === bounds.x && config.window.y === bounds.y &&
-      config.window.width === bounds.width && config.window.height === bounds.height) {
+  if (
+    config.window.x === bounds.x &&
+    config.window.y === bounds.y &&
+    config.window.width === bounds.width &&
+    config.window.height === bounds.height
+  ) {
     return;
   }
 
@@ -681,7 +688,12 @@ function readDefaultConfig(): Record<string, unknown> {
     path.join(process.resourcesPath ?? "", "config/defaults.json")
   ];
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return JSON.parse(fs.readFileSync(candidate, "utf8"));
+    if (!fs.existsSync(candidate)) continue;
+    // JSON.parse 返回 any；显式收敛并确认是对象，避免 any 扩散成 AppConfig。
+    const parsed: unknown = JSON.parse(fs.readFileSync(candidate, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
   }
   return {};
 }
@@ -690,9 +702,7 @@ function findPersonalSeedPath(): string | undefined {
   const candidates = [
     path.join(app.getPath("userData"), "personal.local.json"),
     path.join(path.dirname(app.getPath("exe")), "personal.local.json"),
-    ...(!app.isPackaged
-      ? [path.join(process.cwd(), "config", "personal.local.json")]
-      : [])
+    ...(!app.isPackaged ? [path.join(process.cwd(), "config", "personal.local.json")] : [])
   ];
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
@@ -706,21 +716,23 @@ function hardenRendererWindow(window: BrowserWindow): void {
 
 function handleTrusted(
   channel: string,
-  listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown
+  // 用 unknown[] 而不是 any[]：渲染器传进来的参数都是不可信输入，必须由各 handler 自行收窄。
+  listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 ): void {
   ipcMain.handle(channel, (event, ...args) => {
     const senderUrl = event.senderFrame?.url ?? event.sender.getURL();
     if (!isTrustedRendererUrl(senderUrl, LOCAL_RENDERER_URLS, devServerUrl)) {
       throw new Error("拒绝来自非受信页面的请求");
     }
-    return listener(event, ...args);
+    // Electron 把 args 标为 any[]；显式收敛成 unknown[] 交给各 handler 自行收窄。
+    return listener(event, ...(args as unknown[]));
   });
 }
 function quoteSurfaceIsForeground(): boolean {
   return Boolean(
-    mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() ||
-    quickWindow && !quickWindow.isDestroyed() && quickWindow.isVisible() ||
-    excelWindow && !excelWindow.isDestroyed() && excelWindow.isVisible() ||
+    (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) ||
+    (quickWindow && !quickWindow.isDestroyed() && quickWindow.isVisible()) ||
+    (excelWindow && !excelWindow.isDestroyed() && excelWindow.isVisible()) ||
     localWorkWebVisibleClients > 0
   );
 }
@@ -742,7 +754,9 @@ function runQuoteRefresh(): void {
   if (isQuitting || !refreshQuotesNow) return;
   if (quotePollTimer) clearTimeout(quotePollTimer);
   const startedAtMs = Date.now();
-  void refreshQuotesNow().finally(() => scheduleQuoteRefresh(startedAtMs));
+  void refreshQuotesNow()
+    .catch((error) => reportInternalFailure("quotes", error))
+    .finally(() => scheduleQuoteRefresh(startedAtMs));
 }
 
 function scheduleFastIndexRefresh(startedAtMs: number): void {
@@ -759,7 +773,9 @@ function runFastIndexRefresh(): void {
   if (isQuitting || !refreshFastIndicesNow) return;
   if (fastIndexPollTimer) clearTimeout(fastIndexPollTimer);
   const startedAtMs = Date.now();
-  void refreshFastIndicesNow().finally(() => scheduleFastIndexRefresh(startedAtMs));
+  void refreshFastIndicesNow()
+    .catch((error) => reportInternalFailure("indices", error))
+    .finally(() => scheduleFastIndexRefresh(startedAtMs));
 }
 
 function scheduleMarketRefresh(): void {
@@ -768,20 +784,26 @@ function scheduleMarketRefresh(): void {
   const activeInterval = Math.max(config.pollIntervals.quotesMs * 3, 15_000);
   const target = isAShareTradingSession(new Date()) ? activeInterval : 60_000;
   const delay = startToStartDelayMs(target, 0);
-  marketPollTimer = setTimeout(async () => {
-    try {
-      await refreshMarketNow?.();
-    } finally {
-      scheduleMarketRefresh();
-    }
+  marketPollTimer = setTimeout(() => {
+    void runMarketRefresh();
   }, delay);
+}
+
+async function runMarketRefresh(): Promise<void> {
+  try {
+    await refreshMarketNow?.();
+  } catch (error) {
+    reportInternalFailure("market", error);
+  } finally {
+    scheduleMarketRefresh();
+  }
 }
 
 function refreshAfterConnectivityChange(): void {
   runQuoteRefresh();
   runFastIndexRefresh();
-  void refreshMarketNow?.();
-  void refreshNewsNow?.();
+  triggerRefresh("market", refreshMarketNow);
+  triggerRefresh("news", refreshNewsNow);
 }
 
 async function refreshQuotes(): Promise<void> {
@@ -805,6 +827,14 @@ async function refreshQuotes(): Promise<void> {
       latestErrors = latestErrors.filter((error) => !error.startsWith("quotes:"));
     } else {
       const now = evaluationTime;
+      // 交易日历只按年维护：未收录的年份会退化为"工作日 + 时段"判断，休市日会被当作
+      // 交易日。这里把该状态变成可见告警，避免静默降级（否则 2027 起无人察觉）。
+      latestErrors = isTradingCalendarVerified(now)
+        ? latestErrors.filter((error) => !error.startsWith("calendar:"))
+        : upsertError(
+            latestErrors,
+            "calendar:交易日历未收录当前年份，休市日将按交易日处理，请更新到新版本"
+          );
       const result = await quoteCoordinator.fetch(codes, config.providers.quote, {
         marketOpen: isAShareTradingSession(now),
         nowMs: now.getTime(),
@@ -839,7 +869,12 @@ async function refreshQuotes(): Promise<void> {
     quotesAlertSafe = false;
     latestErrors = upsertError(latestErrors, `quotes:${errorMessage(error)}`);
   }
-  await refreshRisk(evaluationTime);
+  // 提醒子系统（系统通知 / 托盘）的异常不应中断行情快照，也不能让 rejection 逃逸出去。
+  try {
+    await refreshRisk(evaluationTime);
+  } catch (error) {
+    reportInternalFailure("risk", error);
+  }
   pushQuoteSnapshotIfNeeded();
 }
 
@@ -881,22 +916,25 @@ async function refreshFastIndices(): Promise<void> {
       ...latestMarket,
       indices: result.items,
       source: result.source ?? latestMarket.source,
-      updatedAt: newestQuoteTimestamp(result.items.map((item) => ({
-        code: item.instrument.code,
-        name: item.instrument.name,
-        market: item.instrument.market,
-        price: item.price,
-        change: item.change,
-        changePercent: item.changePercent,
-        open: null,
-        previousClose: null,
-        high: null,
-        low: null,
-        volume: null,
-        amount: item.amount,
-        source: item.source,
-        updatedAt: item.updatedAt ?? undefined
-      }))) ?? latestMarket.updatedAt,
+      updatedAt:
+        newestQuoteTimestamp(
+          result.items.map((item) => ({
+            code: item.instrument.code,
+            name: item.instrument.name,
+            market: item.instrument.market,
+            price: item.price,
+            change: item.change,
+            changePercent: item.changePercent,
+            open: null,
+            previousClose: null,
+            high: null,
+            low: null,
+            volume: null,
+            amount: item.amount,
+            source: item.source,
+            updatedAt: item.updatedAt ?? undefined
+          }))
+        ) ?? latestMarket.updatedAt,
       errors: [
         ...latestMarket.errors.filter((error) => !error.startsWith("indices:")),
         ...result.errors.map((error) => `indices:${error}`)
@@ -929,17 +967,14 @@ async function refreshRisk(now: Date): Promise<void> {
     feedHealthy: !quotesLastAttemptFailed && !stalled,
     now
   });
-  const evaluation = alertEngine.evaluate(
-    buildAlertCandidates(config, calculated),
-    {
-      now,
-      mode: config.risk.mode,
-      cooldownMinutes: config.risk.cooldownMinutes,
-      oncePerDay: config.risk.oncePerDay,
-      onlyDuringTrading: config.risk.onlyDuringTrading,
-      tradingSession: isAShareTradingSession(now)
-    }
-  );
+  const evaluation = alertEngine.evaluate(buildAlertCandidates(config, calculated), {
+    now,
+    mode: config.risk.mode,
+    cooldownMinutes: config.risk.cooldownMinutes,
+    oncePerDay: config.risk.oncePerDay,
+    onlyDuringTrading: config.risk.onlyDuringTrading,
+    tradingSession: isAShareTradingSession(now)
+  });
   latestRisk = {
     ...calculated,
     paused: evaluation.paused,
@@ -947,8 +982,10 @@ async function refreshRisk(now: Date): Promise<void> {
     recentEvents: alertEngine.recentEvents()
   };
   if (evaluation.events.length > 0) deliverAlertEvents(evaluation.events);
-  if (evaluation.stateChanged &&
-      (evaluation.events.length > 0 || now.getTime() - lastAlertStateSaveAt >= 30_000)) {
+  if (
+    evaluation.stateChanged &&
+    (evaluation.events.length > 0 || now.getTime() - lastAlertStateSaveAt >= 30_000)
+  ) {
     await persistAlertState(now.getTime());
   }
 }
@@ -962,17 +999,54 @@ async function persistAlertState(nowMs = Date.now()): Promise<void> {
   }
 }
 
+/**
+ * 托盘提示要选"最该看的那条"。
+ * 同一批事件的 `triggeredAt` 完全相同，`events.at(-1)` 取到的只是候选生成顺序里的最后一个，
+ * 并不是最严重的，因此按规则类型排一个优先级。
+ */
+const ALERT_SEVERITY: Record<AlertEvent["type"], number> = {
+  stop_loss: 100,
+  price_below: 90,
+  fall_percent: 85,
+  total_loss: 80,
+  daily_loss: 75,
+  portfolio_daily_loss: 70,
+  group_loss: 65,
+  near_stop: 60,
+  exposure: 55,
+  position_value: 50,
+  holding_count: 45,
+  price_above: 40,
+  rise_percent: 35,
+  watch_price: 30,
+  daily_profit: 20,
+  total_profit: 15,
+  portfolio_daily_profit: 10,
+  group_profit: 5
+};
+
+function mostSevereAlert(
+  events: AppSnapshot["risk"]["recentEvents"]
+): AppSnapshot["risk"]["recentEvents"][number] | undefined {
+  let best: (typeof events)[number] | undefined;
+  for (const event of events) {
+    // 只在严格更大时替换，因此并列时保留先生成的那条。
+    if (!best || ALERT_SEVERITY[event.type] > ALERT_SEVERITY[best.type]) best = event;
+  }
+  return best;
+}
+
 function deliverAlertEvents(events: AppSnapshot["risk"]["recentEvents"]): void {
   if (config.risk.mode !== "active") return;
-  const newest = events.at(-1);
-  if (!newest) return;
+  const mostSevere = mostSevereAlert(events);
+  if (!mostSevere) return;
   if (config.risk.notifications.windows && Notification.isSupported()) {
     for (const event of events) {
       new Notification({ title: event.title, body: event.message, silent: true }).show();
     }
   }
   if (config.risk.notifications.tray) {
-    tray?.setToolTip(`提醒：${newest.title}`);
+    tray?.setToolTip(`提醒：${mostSevere.title}`);
     updateTrayMenu();
   }
 }
@@ -1026,11 +1100,14 @@ async function refreshNews(): Promise<void> {
     });
     const candidates = selectRelevantNews(result.items).slice(0, candidateLimit);
     const now = new Date();
-    const pending = config.ai.enabled && config.ai.apiKey
-      ? candidates.filter((item) =>
-          !item.analysis && newsEventStore.analysisDue(item.eventId ?? item.id, now, analysisNamespace)
-        )
-      : [];
+    const pending =
+      config.ai.enabled && config.ai.apiKey
+        ? candidates.filter(
+            (item) =>
+              !item.analysis &&
+              newsEventStore.analysisDue(item.eventId ?? item.id, now, analysisNamespace)
+          )
+        : [];
     const analyzed = candidates.map((item) => ({
       ...item,
       analysis: item.analysis ?? analyzeNewsWithRules(item, "AI 分析排队中")
@@ -1047,23 +1124,27 @@ async function refreshNews(): Promise<void> {
       ? upsertError(latestErrors, `news:${sourceHealthMessage}`)
       : latestErrors.filter((error) => !error.startsWith("news:"));
     void analyzePendingNews(
-      pending.slice(0, 5), candidates, analysisNamespace, candidateLimit, generation
+      pending.slice(0, 5),
+      candidates,
+      analysisNamespace,
+      candidateLimit,
+      generation
     );
-  } catch {
+  } catch (error) {
     newsLastAttemptFailed = true;
     const sourceHealthMessage = summarizeNewsSourceHealth(newsSourceStates());
-    latestErrors = upsertError(
-      latestErrors,
-      `news:${sourceHealthMessage ?? "资讯更新暂时失败，稍后自动重试"}`
-    );
+    // 不要吞掉异常本身：此前 catch {} 丢掉了 newsData 抛出的具体原因。
+    const detail = [sourceHealthMessage, errorMessage(error)].filter(Boolean).join("；");
+    latestErrors = upsertError(latestErrors, `news:${detail || "资讯更新暂时失败，稍后自动重试"}`);
   }
   pushSnapshot();
 }
 
 function presentNews(items: AppSnapshot["news"], limit: number): AppSnapshot["news"] {
-  return (config.news.mode === "important"
-    ? items.filter((item) => item.analysis?.useful === true && item.analysis.priority !== "low")
-    : items
+  return (
+    config.news.mode === "important"
+      ? items.filter((item) => item.analysis?.useful === true && item.analysis.priority !== "low")
+      : items
   ).slice(0, limit);
 }
 
@@ -1092,8 +1173,8 @@ async function analyzePendingNews(
     if (generation !== newsRefreshGeneration || namespace !== aiAnalysisNamespace()) return;
     const analyzed = candidates.map((item) => ({
       ...item,
-      analysis: item.analysis ?? analyzedById.get(item.id) ??
-        analyzeNewsWithRules(item, "AI 分析排队中")
+      analysis:
+        item.analysis ?? analyzedById.get(item.id) ?? analyzeNewsWithRules(item, "AI 分析排队中")
     }));
     latestNews = presentNews(analyzed, limit);
     pushSnapshot();
@@ -1106,8 +1187,9 @@ async function analyzePendingNews(
 }
 
 function newsSourceStates() {
-  return ["eastmoney", "media-fallback", "cninfo", "csrc"]
-    .map((source) => newsEventStore.sourceState(source));
+  return ["eastmoney", "media-fallback", "cninfo", "csrc"].map((source) =>
+    newsEventStore.sourceState(source)
+  );
 }
 
 function selectRelevantNews<T extends NewsItem>(items: T[]): T[] {
@@ -1120,9 +1202,7 @@ function selectRelevantNews<T extends NewsItem>(items: T[]): T[] {
   );
   const annotated = items.map((item): T => {
     const text = `${item.title} ${item.summary ?? ""}`;
-    const relatedCodes = new Set(
-      (item.relatedCodes ?? []).filter((code) => activeCodes.has(code))
-    );
+    const relatedCodes = new Set((item.relatedCodes ?? []).filter((code) => activeCodes.has(code)));
     for (const security of securities) {
       const keywords = [
         security.code,
@@ -1145,12 +1225,7 @@ function selectRelevantNews<T extends NewsItem>(items: T[]): T[] {
 }
 function aiAnalysisNamespace(): string {
   if (!config.ai.enabled || !config.ai.apiKey) return "rules-v2";
-  return [
-    "ai-v4",
-    config.ai.provider,
-    config.ai.baseUrl,
-    config.ai.model
-  ].join(":");
+  return ["ai-v4", config.ai.provider, config.ai.baseUrl, config.ai.model].join(":");
 }
 
 async function maybeAnalyzeBatch(items: NewsItem[]): Promise<NewsAnalysis[]> {
@@ -1205,13 +1280,13 @@ function setAiReadyStatus(message?: string): void {
     state: configured ? "ready" : "unconfigured",
     provider: config.ai.provider,
     model: config.ai.model,
-    message: message ?? (
-      configured
+    message:
+      message ??
+      (configured
         ? config.ai.enabled
           ? `已配置 ${config.ai.model}`
           : "已配置但未启用"
-        : "未配置 API Key，使用本地规则"
-    )
+        : "未配置 API Key，使用本地规则")
   };
 }
 
@@ -1237,16 +1312,12 @@ async function initializeAiCredentials(): Promise<void> {
   }
 
   config.ai.apiKey = secureKey || environmentKey;
-  aiCredentialSource = secureKey
-    ? "secure"
-    : environmentKey
-      ? "environment"
-      : "none";
+  aiCredentialSource = secureKey ? "secure" : environmentKey ? "environment" : "none";
   setAiReadyStatus(
     credentialError ||
-    (aiCredentialSource === "environment"
-      ? "使用环境变量中的 API Key；设置页不会显示明文"
-      : undefined)
+      (aiCredentialSource === "environment"
+        ? "使用环境变量中的 API Key；设置页不会显示明文"
+        : undefined)
   );
   if (credentialError) aiStatus.state = "error";
 }
@@ -1258,7 +1329,7 @@ async function setAiApiKey(value: unknown): Promise<AiRuntimeStatus> {
   aiCredentialSource = "secure";
   setAiReadyStatus("API Key 已通过系统安全存储加密保存");
   pushAiStatus();
-  void refreshNewsNow?.();
+  triggerRefresh("news", refreshNewsNow);
   return aiStatusForRenderer();
 }
 
@@ -1274,7 +1345,7 @@ async function clearAiApiKey(): Promise<AiRuntimeStatus> {
   );
   newsAnalyzer.clearMemory();
   pushAiStatus();
-  void refreshNewsNow?.();
+  triggerRefresh("news", refreshNewsNow);
   return aiStatusForRenderer();
 }
 
@@ -1442,8 +1513,8 @@ function registerIpc(): void {
     });
   });
   handleTrusted("settings:save", async (_event, value: unknown) => saveSettings(value));
-  handleTrusted("navigation:setActiveTab", async (_event, tabId: string) =>
-    setActiveTab(tabId)
+  handleTrusted("navigation:setActiveTab", async (_event, tabId: unknown) =>
+    typeof tabId === "string" ? setActiveTab(tabId) : settingsForRenderer(config)
   );
   handleTrusted("settings:open", () => openSettingsWindow());
   handleTrusted("window:hide", () => hideMainWindow());
@@ -1462,14 +1533,16 @@ function registerIpc(): void {
     }
     if (action === "close") excelWindow.hide();
   });
-  handleTrusted("appearance:setBackgroundOpacity", async (_event, opacity: number) => {
+  handleTrusted("appearance:setBackgroundOpacity", async (_event, opacity: unknown) => {
     const next = toUserSettings(config);
-    next.appearance.backgroundOpacity = opacity;
+    const value = Number(opacity);
+    // 非法输入保持当前值，其余交给保存路径的规范化裁剪。
+    if (Number.isFinite(value)) next.appearance.backgroundOpacity = value;
     return saveSettings(next);
   });
   handleTrusted("appearance:toggleTheme", () => toggleTheme());
-  handleTrusted("link:open", async (_event, url: string) => {
-    if (/^https?:\/\//.test(url)) await shell.openExternal(url);
+  handleTrusted("link:open", async (_event, url: unknown) => {
+    if (typeof url === "string" && /^https?:\/\//.test(url)) await shell.openExternal(url);
   });
   handleTrusted("news:copyContext", (_event, eventId: unknown) => {
     const text = sanitizedContextForEvent(eventId);
@@ -1483,7 +1556,8 @@ function registerIpc(): void {
   handleTrusted("profile:apply", async (_event, value: unknown) => {
     const request = parseProfileRequest(value);
     const preview = previewProfileImport(settingsForRenderer(config), request.text, request.mode);
-    if (!preview.valid || !preview.nextSettings) throw new Error("配置包校验失败，请先修正预览中的问题");
+    if (!preview.valid || !preview.nextSettings)
+      throw new Error("配置包校验失败，请先修正预览中的问题");
     if (!preview.hasChanges) throw new Error("配置包与当前设置没有差异，无需导入");
     const backupCreated = await settingsStore.createImportBackup();
     const saved = await saveSettings(preview.nextSettings);
@@ -1502,8 +1576,8 @@ function registerIpc(): void {
     const backup = await settingsStore.readImportBackup();
     return saveSettings(toUserSettings(backup));
   });
-  handleTrusted("window:toggleClickThrough", (_event, enabled: boolean) =>
-    toggleClickThrough(enabled)
+  handleTrusted("window:toggleClickThrough", (_event, enabled: unknown) =>
+    toggleClickThrough(Boolean(enabled))
   );
 }
 
@@ -1536,9 +1610,10 @@ function sanitizedContextForEvent(value: unknown): string {
   const quote = relatedCode ? latestQuotes.find((entry) => entry.code === relatedCode) : undefined;
   const benchmarkCode = benchmarkCodeForSecurity(relatedCode ?? "600000");
   const benchmark = latestMarket.indices.find((entry) => entry.instrument.code === benchmarkCode);
-  const recentAlerts = latestRisk.recentEvents.filter((event) =>
-    event.securityCode === relatedCode &&
-    Date.now() - Date.parse(event.triggeredAt) <= 30 * 60_000
+  const recentAlerts = latestRisk.recentEvents.filter(
+    (event) =>
+      event.securityCode === relatedCode &&
+      Date.now() - Date.parse(event.triggeredAt) <= 30 * 60_000
   );
   const cue = buildDecisionCue({
     item,
@@ -1549,32 +1624,38 @@ function sanitizedContextForEvent(value: unknown): string {
     benchmarkChangePercent: benchmark?.changePercent ?? null,
     recentRuleTriggered: recentAlerts.length > 0
   });
-  const tracking = relatedCode && holdingCodes.has(relatedCode)
-    ? "holding"
-    : relatedCode && watchlistCodes.has(relatedCode)
-      ? "watchlist"
-      : "market";
+  const tracking =
+    relatedCode && holdingCodes.has(relatedCode)
+      ? "holding"
+      : relatedCode && watchlistCodes.has(relatedCode)
+        ? "watchlist"
+        : "market";
   const securityName = relatedCode
-    ? config.securities.find((security) => security.code === relatedCode)?.name ??
-      quote?.name ?? null
+    ? (config.securities.find((security) => security.code === relatedCode)?.name ??
+      quote?.name ??
+      null)
     : null;
 
   return buildSanitizedEventContext({
     item,
     tracking,
     securityName,
-    quote: quote ? {
-      code: quote.code,
-      price: quote.price,
-      changePercent: quote.changePercent,
-      updatedAt: quote.updatedAt,
-      source: quote.source
-    } : undefined,
-    benchmark: benchmark ? {
-      name: benchmark.instrument.name,
-      changePercent: benchmark.changePercent,
-      updatedAt: benchmark.updatedAt
-    } : undefined,
+    quote: quote
+      ? {
+          code: quote.code,
+          price: quote.price,
+          changePercent: quote.changePercent,
+          updatedAt: quote.updatedAt,
+          source: quote.source
+        }
+      : undefined,
+    benchmark: benchmark
+      ? {
+          name: benchmark.instrument.name,
+          changePercent: benchmark.changePercent,
+          updatedAt: benchmark.updatedAt
+        }
+      : undefined,
     cue,
     alerts: recentAlerts.map((event) => ({
       type: event.type,
@@ -1590,14 +1671,15 @@ function resolveMarketInstrument(value: unknown): MarketInstrument {
   const request = value as Record<string, unknown>;
   const kind = request.kind === "index" ? "index" : request.kind === "stock" ? "stock" : null;
   const code = typeof request.code === "string" ? request.code.trim() : "";
-  const market = request.market === "SH" || request.market === "SZ" || request.market === "BJ"
-    ? request.market
-    : null;
+  const market =
+    request.market === "SH" || request.market === "SZ" || request.market === "BJ"
+      ? request.market
+      : null;
   if (!kind || !market || !/^\d{6}$/.test(code)) throw new Error("无效的行情标的");
 
   if (kind === "index") {
-    const matched = DEFAULT_MARKET_INDICES.find((item) =>
-      item.code === code && item.market === market
+    const matched = DEFAULT_MARKET_INDICES.find(
+      (item) => item.code === code && item.market === market
     );
     if (!matched) throw new Error("不支持的市场指数");
     return matched;
@@ -1630,10 +1712,17 @@ async function saveSettings(
   try {
     const previous = config;
     const candidate = structuredClone(value);
-    if (captureCurrentBounds &&
-        candidate && typeof candidate === "object" && "window" in candidate &&
-        mainWindow && !mainWindow.isDestroyed() &&
-        !mainWindow.isMaximized() && !mainWindow.isFullScreen() && !mainWindow.isMinimized()) {
+    if (
+      captureCurrentBounds &&
+      candidate &&
+      typeof candidate === "object" &&
+      "window" in candidate &&
+      mainWindow &&
+      !mainWindow.isDestroyed() &&
+      !mainWindow.isMaximized() &&
+      !mainWindow.isFullScreen() &&
+      !mainWindow.isMinimized()
+    ) {
       const incoming = candidate as UserSettings;
       incoming.window = { ...incoming.window, ...mainWindow.getBounds() };
     }
@@ -1654,9 +1743,9 @@ async function saveSettings(
     pushSnapshot();
     pushSettings();
     if (refreshData) {
-      void refreshQuotesNow?.();
-      void refreshMarketNow?.();
-      void refreshNewsNow?.();
+      triggerRefresh("quotes", refreshQuotesNow);
+      triggerRefresh("market", refreshMarketNow);
+      triggerRefresh("news", refreshNewsNow);
     }
     return settingsForRenderer(config);
   } finally {
@@ -1695,10 +1784,13 @@ function toggleQuickView(): void {
     x: trayBounds.x + Math.round(trayBounds.width / 2),
     y: trayBounds.y + Math.round(trayBounds.height / 2)
   });
-  quickWindow.setBounds(quickWindowBounds(trayBounds, display.workArea, {
-    width: 320,
-    height: 380
-  }), false);
+  quickWindow.setBounds(
+    quickWindowBounds(trayBounds, display.workArea, {
+      width: 320,
+      height: 380
+    }),
+    false
+  );
   quickWindow.show();
   quickWindow.focus();
   runQuoteRefresh();
@@ -1712,8 +1804,9 @@ function toggleWindow(fromBossKey: boolean): void {
     return;
   }
 
-  const settingsVisible = Boolean(settingsWindow && !settingsWindow.isDestroyed() &&
-    settingsWindow.isVisible());
+  const settingsVisible = Boolean(
+    settingsWindow && !settingsWindow.isDestroyed() && settingsWindow.isVisible()
+  );
   if (mainWindow.isVisible() || (fromBossKey && settingsVisible)) {
     mainWindow.hide();
     if (fromBossKey) {
@@ -1779,6 +1872,23 @@ function upsertError(errors: string[], next: string): string[] {
   return [next, ...errors.filter((error) => !error.startsWith(`${prefix}:`))].slice(0, 4);
 }
 
+/**
+ * 触发一次后台刷新。
+ *
+ * 这些刷新在 `try` 之外还有会抛错的尾部工作（例如 refreshQuotes 末尾的 refreshRisk →
+ * 系统通知/托盘，refreshNews 末尾的 pushSnapshot），`.finally()` 会把 rejection 重新抛进
+ * 已被丢弃的派生 Promise，于是主进程收到 unhandledRejection 且原始原因丢失。
+ * 统一在这里捕获并记入可见告警。
+ */
+function triggerRefresh(scope: string, task: (() => Promise<void>) | null | undefined): void {
+  if (!task) return;
+  void task().catch((error) => reportInternalFailure(scope, error));
+}
+
+function reportInternalFailure(scope: string, error: unknown): void {
+  latestErrors = upsertError(latestErrors, `internal:${scope} 刷新异常：${errorMessage(error)}`);
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -1788,114 +1898,123 @@ function parsePreviewPort(value: string | undefined): number {
   return Number.isInteger(port) && port >= 1024 && port <= 65_535 ? port : 0;
 }
 
-if (hasSingleInstanceLock) app.whenReady().then(async () => {
-  if (process.platform === "win32") app.setAppUserModelId("dev.polaris.floatingStockWidget");
-  loadEnvironmentFiles();
-  devServerUrl = resolveDevServerUrl(app.isPackaged, process.env.VITE_DEV_SERVER_URL);
-  const defaults = readDefaultConfig();
-  settingsStore = new SettingsStore(
-    path.join(app.getPath("userData"), "settings.json"),
-    defaults,
-    process.env,
-    findPersonalSeedPath()
-  );
-  config = await settingsStore.load();
-  const settingsRecoveryMessage = settingsStore.consumeRecoveryMessage();
-  if (settingsRecoveryMessage) latestErrors = upsertError(latestErrors, `settings:${settingsRecoveryMessage}`);
-  aiCredentialStore = new EncryptedApiKeyStore(
-    path.join(app.getPath("userData"), "ai-credential.json"),
-    {
-      isAvailable: () => safeStorage.isEncryptionAvailable(),
-      encryptString: (value) => safeStorage.encryptString(value),
-      decryptString: (value) => safeStorage.decryptString(value)
-    }
-  );
-  await initializeAiCredentials();
-  clickThrough = config.window.clickThrough;
-  if (!config.navigation.rememberLastTab) {
-    config.navigation.lastActiveTabId = config.navigation.defaultTabId;
-  }
-  newsAnalyzer = new CachedNewsAnalyzer(
-    maybeAnalyzeBatch,
-    new JsonNewsAnalysisCache(path.join(app.getPath("userData"), "ai-analysis-cache.json")),
-    5
-  );
-  alertStateStore = new JsonAlertStateStore(
-    path.join(app.getPath("userData"), "alert-state.json")
-  );
-  alertEngine = new AlertEngine(await alertStateStore.read());
-  latestRisk = {
-    ...emptyRiskSnapshot(config.risk.mode),
-    paused: alertEngine.isPaused(),
-    pausedThroughDate: alertEngine.exportState().pausedThroughDate,
-    recentEvents: alertEngine.recentEvents()
-  };
-  marketDataCoordinator = new MarketDataCoordinator(
-    undefined,
-    new JsonMarketCache(path.join(app.getPath("userData"), "market-cache.json"))
-  );
-  const newsStoreResult = openRecoveringNewsEventStore(
-    path.join(app.getPath("userData"), "news-events.sqlite")
-  );
-  newsEventStore = newsStoreResult.store;
-  if (newsStoreResult.recovered) {
-    latestErrors = upsertError(latestErrors, "news:本地新闻数据库损坏，已隔离并重建");
-  }
-  newsDataCoordinator = new NewsDataCoordinator(newsEventStore);
-
-  localWorkWeb = new LocalWorkWebServer({
-    assetRoot: WORK_WEB_ROOT,
-    snapshot: () => buildPublicSnapshot(snapshot()),
-    trend: async (code) => {
-      const visible = config.watchlist.some((item) => item.visible && item.securityCode === code);
-      const security = config.securities.find((item) => item.code === code);
-      if (!visible || !security) return null;
-      const now = new Date();
-      const detail = await marketDataCoordinator.fetchDetail(
-        resolveMarketInstrument({ kind: "stock", market: security.market, code }),
-        config.providers.quote,
-        {
-          marketOpen: isAShareTradingSession(now),
-          nowMs: now.getTime(),
-          maxSourceAgeMs: Math.max(config.pollIntervals.quotesMs * 10, 180_000)
-        }
-      );
-      return buildPublicTrend(detail);
-    },
-    token: !app.isPackaged ? process.env.MOYU_WEB_PREVIEW_TOKEN : undefined,
-    onVisibleClientsChange: (count) => {
-      const becameVisible = localWorkWebVisibleClients === 0 && count > 0;
-      localWorkWebVisibleClients = count;
-      if (becameVisible) {
-        void refreshQuotesNow?.();
-        void refreshFastIndicesNow?.();
+if (hasSingleInstanceLock)
+  void app.whenReady().then(async () => {
+    if (process.platform === "win32") app.setAppUserModelId("dev.polaris.floatingStockWidget");
+    loadEnvironmentFiles();
+    devServerUrl = resolveDevServerUrl(app.isPackaged, process.env.VITE_DEV_SERVER_URL);
+    const defaults = readDefaultConfig();
+    settingsStore = new SettingsStore(
+      path.join(app.getPath("userData"), "settings.json"),
+      defaults,
+      process.env,
+      findPersonalSeedPath()
+    );
+    config = await settingsStore.load();
+    const settingsRecoveryMessage = settingsStore.consumeRecoveryMessage();
+    if (settingsRecoveryMessage)
+      latestErrors = upsertError(latestErrors, `settings:${settingsRecoveryMessage}`);
+    aiCredentialStore = new EncryptedApiKeyStore(
+      path.join(app.getPath("userData"), "ai-credential.json"),
+      {
+        isAvailable: () => safeStorage.isEncryptionAvailable(),
+        encryptString: (value) => safeStorage.encryptString(value),
+        decryptString: (value) => safeStorage.decryptString(value)
       }
+    );
+    await initializeAiCredentials();
+    clickThrough = config.window.clickThrough;
+    if (!config.navigation.rememberLastTab) {
+      config.navigation.lastActiveTabId = config.navigation.defaultTabId;
     }
+    newsAnalyzer = new CachedNewsAnalyzer(
+      maybeAnalyzeBatch,
+      new JsonNewsAnalysisCache(path.join(app.getPath("userData"), "ai-analysis-cache.json")),
+      5
+    );
+    alertStateStore = new JsonAlertStateStore(
+      path.join(app.getPath("userData"), "alert-state.json")
+    );
+    alertEngine = new AlertEngine(await alertStateStore.read());
+    latestRisk = {
+      ...emptyRiskSnapshot(config.risk.mode),
+      paused: alertEngine.isPaused(),
+      pausedThroughDate: alertEngine.exportState().pausedThroughDate,
+      recentEvents: alertEngine.recentEvents()
+    };
+    marketDataCoordinator = new MarketDataCoordinator(
+      undefined,
+      new JsonMarketCache(path.join(app.getPath("userData"), "market-cache.json"))
+    );
+    const newsStoreResult = openRecoveringNewsEventStore(
+      path.join(app.getPath("userData"), "news-events.sqlite")
+    );
+    newsEventStore = newsStoreResult.store;
+    if (newsStoreResult.recovered) {
+      latestErrors = upsertError(latestErrors, "news:本地新闻数据库损坏，已隔离并重建");
+    }
+    newsDataCoordinator = new NewsDataCoordinator(newsEventStore);
+
+    localWorkWeb = new LocalWorkWebServer({
+      assetRoot: WORK_WEB_ROOT,
+      snapshot: () => buildPublicSnapshot(snapshot()),
+      trend: async (code) => {
+        const visible = config.watchlist.some((item) => item.visible && item.securityCode === code);
+        const security = config.securities.find((item) => item.code === code);
+        if (!visible || !security) return null;
+        const now = new Date();
+        const detail = await marketDataCoordinator.fetchDetail(
+          resolveMarketInstrument({ kind: "stock", market: security.market, code }),
+          config.providers.quote,
+          {
+            marketOpen: isAShareTradingSession(now),
+            nowMs: now.getTime(),
+            maxSourceAgeMs: Math.max(config.pollIntervals.quotesMs * 10, 180_000)
+          }
+        );
+        return buildPublicTrend(detail);
+      },
+      token: !app.isPackaged ? process.env.MOYU_WEB_PREVIEW_TOKEN : undefined,
+      onVisibleClientsChange: (count) => {
+        const becameVisible = localWorkWebVisibleClients === 0 && count > 0;
+        localWorkWebVisibleClients = count;
+        if (becameVisible) {
+          triggerRefresh("quotes", refreshQuotesNow);
+          triggerRefresh("indices", refreshFastIndicesNow);
+        }
+      }
+    });
+    await localWorkWeb.start(
+      !app.isPackaged ? parsePreviewPort(process.env.MOYU_WEB_PREVIEW_PORT) : 0
+    );
+
+    registerIpc();
+    mainWindow = createWindow();
+    createTray();
+    quickWindow = createQuickWindow();
+    if (
+      !app.isPackaged &&
+      (process.env.MOYU_EXCEL_PREVIEW === "1" || process.argv.includes("--excel-preview"))
+    ) {
+      openExcelWorkspace();
+    }
+    registerGlobalShortcuts();
+    powerMonitor.on("resume", refreshAfterConnectivityChange);
+
+    refreshQuotesNow = createSingleFlight(refreshQuotes);
+    refreshFastIndicesNow = createSingleFlight(refreshFastIndices);
+    refreshMarketNow = createSingleFlight(refreshMarket);
+    refreshNewsNow = createSingleFlight(refreshNews);
+    runQuoteRefresh();
+    runFastIndexRefresh();
+    void runMarketRefresh();
+    triggerRefresh("news", refreshNewsNow);
+    newsPollTimer = setInterval(
+      () => triggerRefresh("news", refreshNewsNow),
+      config.pollIntervals.newsMs
+    );
+    if (!app.isPackaged && process.argv.includes("--web-preview")) void openLocalWorkWeb();
   });
-  await localWorkWeb.start(!app.isPackaged ? parsePreviewPort(process.env.MOYU_WEB_PREVIEW_PORT) : 0);
-
-  registerIpc();
-  mainWindow = createWindow();
-  createTray();
-  quickWindow = createQuickWindow();
-  if (!app.isPackaged &&
-      (process.env.MOYU_EXCEL_PREVIEW === "1" || process.argv.includes("--excel-preview"))) {
-    openExcelWorkspace();
-  }
-  registerGlobalShortcuts();
-  powerMonitor.on("resume", refreshAfterConnectivityChange);
-
-  refreshQuotesNow = createSingleFlight(refreshQuotes);
-  refreshFastIndicesNow = createSingleFlight(refreshFastIndices);
-  refreshMarketNow = createSingleFlight(refreshMarket);
-  refreshNewsNow = createSingleFlight(refreshNews);
-  runQuoteRefresh();
-  runFastIndexRefresh();
-  void refreshMarketNow().finally(scheduleMarketRefresh);
-  void refreshNewsNow();
-  newsPollTimer = setInterval(() => void refreshNewsNow?.(), config.pollIntervals.newsMs);
-  if (!app.isPackaged && process.argv.includes("--web-preview")) void openLocalWorkWeb();
-});
 
 app.on("before-quit", (event) => {
   if (shutdownReady) {
@@ -1922,6 +2041,12 @@ app.on("before-quit", (event) => {
       localWorkWeb = null;
     } catch (error) {
       console.error("Failed to close local work web", error);
+    }
+    try {
+      // 关闭新闻库：内部会先 checkpoint WAL 再关闭，避免 -wal 长期不回收。
+      newsEventStore?.close();
+    } catch (error) {
+      console.error("Failed to close news store", error);
     }
     shutdownReady = true;
     app.quit();

@@ -19,20 +19,50 @@ describe("local work web server", () => {
     await writeFile(path.join(root, "assets/workweb.js"), "");
     await writeFile(path.join(root, "assets/workweb.css"), "");
     const visible: number[] = [];
-    const snapshot = { updatedAt: "now", quotes: [], indices: [], events: [], feeds: {} } as unknown as PublicSnapshot;
-    const server = new LocalWorkWebServer({ assetRoot: root, snapshot: () => snapshot,
-      trend: async (code) => code === "600519" ? { code, name: "项目甲", updatedAt: "now", stale: false,
-        items: [{ date: "2026-07-11", close: 100, upper: 110, mid: 100, lower: 90 }] } : null,
-      onVisibleClientsChange: (count) => visible.push(count), token: "test-token" });
+    const snapshot = {
+      updatedAt: "now",
+      quotes: [],
+      indices: [],
+      events: [],
+      feeds: {}
+    } as unknown as PublicSnapshot;
+    const server = new LocalWorkWebServer({
+      assetRoot: root,
+      snapshot: () => snapshot,
+      trend: async (code) =>
+        code === "600519"
+          ? {
+              code,
+              name: "项目甲",
+              updatedAt: "now",
+              stale: false,
+              items: [{ date: "2026-07-11", close: 100, upper: 110, mid: 100, lower: 90 }]
+            }
+          : null,
+      onVisibleClientsChange: (count) => visible.push(count),
+      token: "test-token"
+    });
     await server.start();
-    cleanup.push(async () => { await server.close(); await rm(root, { recursive: true, force: true }); });
+    cleanup.push(async () => {
+      await server.close();
+      await rm(root, { recursive: true, force: true });
+    });
 
     assert.equal((await fetch(server.origin)).status, 200);
     assert.equal((await fetch(`${server.origin}/api/public-snapshot`)).status, 401);
-    assert.equal((await fetch(`${server.origin}/api/session`, { method: "POST",
-      headers: { Origin: "http://attacker.invalid", "X-Local-Token": "test-token" } })).status, 403);
-    const session = await fetch(`${server.origin}/api/session`, { method: "POST",
-      headers: { Origin: server.origin, "X-Local-Token": "test-token" } });
+    assert.equal(
+      (
+        await fetch(`${server.origin}/api/session`, {
+          method: "POST",
+          headers: { Origin: "http://attacker.invalid", "X-Local-Token": "test-token" }
+        })
+      ).status,
+      403
+    );
+    const session = await fetch(`${server.origin}/api/session`, {
+      method: "POST",
+      headers: { Origin: server.origin, "X-Local-Token": "test-token" }
+    });
     const cookie = session.headers.get("set-cookie")?.split(";")[0] ?? "";
     assert.equal(session.status, 204);
     const response = await fetch(`${server.origin}/api/public-snapshot`, {
@@ -43,16 +73,45 @@ describe("local work web server", () => {
       headers: { Origin: server.origin, Cookie: cookie }
     });
     assert.equal(trendResponse.status, 200);
-    assert.equal((await trendResponse.json() as { code: string }).code, "600519");
-    assert.equal((await fetch(`${server.origin}/api/trend?code=bad`, {
-      headers: { Origin: server.origin, Cookie: cookie }
-    })).status, 404);
-    const visibility = await fetch(`${server.origin}/api/visibility`, { method: "POST",
+    assert.equal(((await trendResponse.json()) as { code: string }).code, "600519");
+    assert.equal(
+      (
+        await fetch(`${server.origin}/api/trend?code=bad`, {
+          headers: { Origin: server.origin, Cookie: cookie }
+        })
+      ).status,
+      404
+    );
+    const visibility = await fetch(`${server.origin}/api/visibility`, {
+      method: "POST",
       headers: { Origin: server.origin, Cookie: cookie, "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "client_12345", visible: true }) });
+      body: JSON.stringify({ clientId: "client_12345", visible: true })
+    });
     assert.equal(visibility.status, 204);
     assert.equal(visible.at(-1), 1);
     const wrongHost = server.origin.replace("127.0.0.1", "localhost");
     assert.equal((await fetch(wrongHost)).status, 403);
+
+    // 客户端错误应返回 4xx，而不是一律 500。
+    assert.equal(
+      (
+        await fetch(`${server.origin}/api/visibility`, {
+          method: "POST",
+          headers: { Origin: server.origin, Cookie: cookie, "Content-Type": "application/json" },
+          body: "not-json"
+        })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await fetch(`${server.origin}/api/visibility`, {
+          method: "POST",
+          headers: { Origin: server.origin, Cookie: cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ clientId: "c".repeat(2_000), visible: true })
+        })
+      ).status,
+      413
+    );
   });
 });

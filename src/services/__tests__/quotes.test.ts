@@ -1,17 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Quote } from "../../domain/types";
-import {
-  QuoteCoordinator,
-  fetchQuotesWithFallback,
-  type QuoteProviderSet
-} from "../quotes";
+import { QuoteCoordinator, fetchQuotesWithFallback, type QuoteProviderSet } from "../quotes";
 
-function quote(
-  code: string,
-  source: "eastmoney" | "tencent",
-  patch: Partial<Quote> = {}
-): Quote {
+function quote(code: string, source: "eastmoney" | "tencent", patch: Partial<Quote> = {}): Quote {
   return {
     code,
     name: code,
@@ -56,7 +48,10 @@ describe("quote provider fallback", () => {
     });
 
     assert.deepEqual(tencentRequest, ["000001"]);
-    assert.deepEqual(result.quotes.map((item) => item.code), ["600519", "000001"]);
+    assert.deepEqual(
+      result.quotes.map((item) => item.code),
+      ["600519", "000001"]
+    );
     assert.equal(result.source, "mixed");
     assert.equal(result.fallbackCount, 1);
     assert.equal(result.coverage, 1);
@@ -65,14 +60,21 @@ describe("quote provider fallback", () => {
 
   it("falls back when the primary returns HTTP-success but stale source data", async () => {
     const nowMs = Date.parse("2026-07-10T02:00:30.000Z");
-    const coordinator = new QuoteCoordinator({
-      eastmoney: async () => [quote("600519", "eastmoney", {
-        updatedAt: "2026-07-10T01:58:00.000Z"
-      })],
-      tencent: async () => [quote("600519", "tencent", {
-        updatedAt: "2026-07-10T02:00:20.000Z"
-      })]
-    }, { crossCheckEvery: 0 });
+    const coordinator = new QuoteCoordinator(
+      {
+        eastmoney: async () => [
+          quote("600519", "eastmoney", {
+            updatedAt: "2026-07-10T01:58:00.000Z"
+          })
+        ],
+        tencent: async () => [
+          quote("600519", "tencent", {
+            updatedAt: "2026-07-10T02:00:20.000Z"
+          })
+        ]
+      },
+      { crossCheckEvery: 0 }
+    );
 
     const result = await coordinator.fetch(["600519"], "eastmoney", {
       marketOpen: true,
@@ -113,20 +115,27 @@ describe("quote provider fallback", () => {
   it("keeps the last trusted value when providers materially conflict", async () => {
     let eastPrice = 100;
     let tencentPrice = 100;
-    const coordinator = new QuoteCoordinator({
-      eastmoney: async () => [quote("600519", "eastmoney", {
-        price: eastPrice,
-        change: eastPrice - 99,
-        changePercent: (eastPrice - 99) / 99 * 100,
-        high: Math.max(101, eastPrice)
-      })],
-      tencent: async () => [quote("600519", "tencent", {
-        price: tencentPrice,
-        change: tencentPrice - 99,
-        changePercent: (tencentPrice - 99) / 99 * 100,
-        high: Math.max(101, tencentPrice)
-      })]
-    }, { crossCheckEvery: 1 });
+    const coordinator = new QuoteCoordinator(
+      {
+        eastmoney: async () => [
+          quote("600519", "eastmoney", {
+            price: eastPrice,
+            change: eastPrice - 99,
+            changePercent: ((eastPrice - 99) / 99) * 100,
+            high: Math.max(101, eastPrice)
+          })
+        ],
+        tencent: async () => [
+          quote("600519", "tencent", {
+            price: tencentPrice,
+            change: tencentPrice - 99,
+            changePercent: ((tencentPrice - 99) / 99) * 100,
+            high: Math.max(101, tencentPrice)
+          })
+        ]
+      },
+      { crossCheckEvery: 1 }
+    );
 
     await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
     eastPrice = 102;
@@ -144,19 +153,22 @@ describe("quote provider fallback", () => {
 
   it("opens a provider circuit after consecutive failed recovery probes", async () => {
     let eastmoneyCalls = 0;
-    const coordinator = new QuoteCoordinator({
-      eastmoney: async () => {
-        eastmoneyCalls += 1;
-        throw new Error("down");
+    const coordinator = new QuoteCoordinator(
+      {
+        eastmoney: async () => {
+          eastmoneyCalls += 1;
+          throw new Error("down");
+        },
+        tencent: async () => [quote("600519", "tencent")]
       },
-      tencent: async () => [quote("600519", "tencent")]
-    }, {
-      crossCheckEvery: 0,
-      recoveryProbeEvery: 1,
-      stickyCycles: 0,
-      circuitFailureThreshold: 2,
-      circuitOpenCycles: 3
-    });
+      {
+        crossCheckEvery: 0,
+        recoveryProbeEvery: 1,
+        stickyCycles: 0,
+        circuitFailureThreshold: 2,
+        circuitOpenCycles: 3
+      }
+    );
 
     await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
     await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
@@ -173,23 +185,26 @@ describe("quote provider fallback", () => {
   it("returns to the preferred provider only after consecutive healthy probes", async () => {
     const calls: string[] = [];
     let eastmoneyFails = true;
-    const coordinator = new QuoteCoordinator({
-      eastmoney: async () => {
-        calls.push("eastmoney");
-        if (eastmoneyFails) throw new Error("down");
-        return [quote("600519", "eastmoney")];
+    const coordinator = new QuoteCoordinator(
+      {
+        eastmoney: async () => {
+          calls.push("eastmoney");
+          if (eastmoneyFails) throw new Error("down");
+          return [quote("600519", "eastmoney")];
+        },
+        tencent: async () => {
+          calls.push("tencent");
+          return [quote("600519", "tencent")];
+        }
       },
-      tencent: async () => {
-        calls.push("tencent");
-        return [quote("600519", "tencent")];
+      {
+        crossCheckEvery: 0,
+        recoveryProbeEvery: 1,
+        recoverySuccesses: 2,
+        stickyCycles: 0,
+        circuitFailureThreshold: 10
       }
-    }, {
-      crossCheckEvery: 0,
-      recoveryProbeEvery: 1,
-      recoverySuccesses: 2,
-      stickyCycles: 0,
-      circuitFailureThreshold: 10
-    });
+    );
 
     await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
     eastmoneyFails = false;
@@ -204,21 +219,24 @@ describe("quote provider fallback", () => {
   it("sticks to the fallback source after the preferred provider fails", async () => {
     const calls: string[] = [];
     let eastFails = true;
-    const coordinator = new QuoteCoordinator({
-      eastmoney: async () => {
-        calls.push("eastmoney");
-        if (eastFails) throw new Error("down");
-        return [quote("600519", "eastmoney")];
+    const coordinator = new QuoteCoordinator(
+      {
+        eastmoney: async () => {
+          calls.push("eastmoney");
+          if (eastFails) throw new Error("down");
+          return [quote("600519", "eastmoney")];
+        },
+        tencent: async () => {
+          calls.push("tencent");
+          return [quote("600519", "tencent")];
+        }
       },
-      tencent: async () => {
-        calls.push("tencent");
-        return [quote("600519", "tencent")];
+      {
+        crossCheckEvery: 0,
+        recoveryProbeEvery: 10,
+        stickyCycles: 3
       }
-    }, {
-      crossCheckEvery: 0,
-      recoveryProbeEvery: 10,
-      stickyCycles: 3
-    });
+    );
 
     await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
     calls.length = 0;
@@ -247,19 +265,22 @@ describe("quote provider fallback", () => {
 
   it("keeps a failed provider open for a wall-clock duration", async () => {
     let eastmoneyCalls = 0;
-    const coordinator = new QuoteCoordinator({
-      eastmoney: async () => {
-        eastmoneyCalls += 1;
-        throw new Error("down");
+    const coordinator = new QuoteCoordinator(
+      {
+        eastmoney: async () => {
+          eastmoneyCalls += 1;
+          throw new Error("down");
+        },
+        tencent: async () => [quote("600519", "tencent")]
       },
-      tencent: async () => [quote("600519", "tencent")]
-    }, {
-      crossCheckIntervalMs: 0,
-      recoveryProbeIntervalMs: 1,
-      stickyMs: 0,
-      circuitFailureThreshold: 1,
-      circuitOpenMs: 15_000
-    });
+      {
+        crossCheckIntervalMs: 0,
+        recoveryProbeIntervalMs: 1,
+        stickyMs: 0,
+        circuitFailureThreshold: 1,
+        circuitOpenMs: 15_000
+      }
+    );
     const start = Date.parse("2026-07-10T02:00:00.000Z");
 
     await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start });

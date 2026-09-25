@@ -1,5 +1,6 @@
 import type { MarketCode, Quote } from "../domain/types.js";
 import { fetchWithTimeout } from "./fetch.js";
+import { asNumber, asText, isoFromUnixSeconds, marketFromEastmoneyFlag } from "./parseUtils.js";
 
 type EastmoneyDiff = Record<string, unknown>;
 
@@ -22,9 +23,11 @@ const EASTMONEY_FIELDS = [
 
 export function buildEastmoneySecid(code: string): string {
   const normalized = code.trim();
-  if (/^(5|6|9)/.test(normalized)) return `1.${normalized}`;
+  // 北交所（43/83/87/88xxxx 与 920xxx）在东财沿用 0. 前缀。
+  if (/^(4|8)/.test(normalized) || /^920/.test(normalized)) return `0.${normalized}`;
+  // 沪市：60/68、5xxxxx 基金，以及 900xxx B 股。
+  if (/^(5|6)/.test(normalized) || /^900/.test(normalized)) return `1.${normalized}`;
   if (/^(0|2|3)/.test(normalized)) return `0.${normalized}`;
-  if (/^(4|8)/.test(normalized)) return `0.${normalized}`;
   return normalized;
 }
 
@@ -34,8 +37,8 @@ export function parseEastmoneyQuoteList(payload: unknown): Quote[] {
   if (!Array.isArray(rows)) return [];
 
   return rows.map((row) => ({
-    code: asString(row.f12),
-    name: asString(row.f14),
+    code: asText(row.f12),
+    name: asText(row.f14),
     market: marketFromEastmoney(row.f13),
     price: asNumber(row.f2),
     change: asNumber(row.f4),
@@ -64,36 +67,25 @@ export async function fetchEastmoneyQuotes(
   url.searchParams.set("fields", EASTMONEY_FIELDS);
   url.searchParams.set("secids", secids);
 
-  const response = await fetchWithTimeout(fetcher, url, {
-    headers: {
-      Referer: "https://quote.eastmoney.com/",
-      "User-Agent": "Mozilla/5.0"
-    }
-  }, timeoutMs);
+  const response = await fetchWithTimeout(
+    fetcher,
+    url,
+    {
+      headers: {
+        Referer: "https://quote.eastmoney.com/",
+        "User-Agent": "Mozilla/5.0"
+      }
+    },
+    timeoutMs
+  );
   if (!response.ok) throw new Error(`Eastmoney quotes failed: ${response.status}`);
   return parseEastmoneyQuoteList(await response.json());
 }
 
 function marketFromEastmoney(value: unknown): MarketCode {
-  if (value === 1 || value === "1") return "SH";
-  if (value === 0 || value === "0") return "SZ";
-  if (value === 2 || value === "2") return "BJ";
-  return "UNKNOWN";
+  return marketFromEastmoneyFlag(value);
 }
 
 function asIsoFromUnixSeconds(value: unknown): string | undefined {
-  const seconds = Number(value);
-  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
-  return new Date(seconds * 1000).toISOString();
-}
-
-
-function asString(value: unknown): string {
-  return typeof value === "string" ? value : value == null ? "" : String(value);
-}
-
-function asNumber(value: unknown): number | null {
-  if (value === "-" || value === "" || value == null) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  return isoFromUnixSeconds(value) ?? undefined;
 }

@@ -31,11 +31,7 @@ describe("window bounds", () => {
   it("repairs a missing position and keeps the window inside a small work area", () => {
     const small = { x: 0, y: 0, width: 320, height: 240 };
     assert.deepEqual(
-      ensureVisibleWindowBounds(
-        { x: null, y: null, width: 900, height: 900 },
-        [small],
-        small
-      ),
+      ensureVisibleWindowBounds({ x: null, y: null, width: 900, height: 900 }, [small], small),
       { x: 0, y: 0, width: 320, height: 240 }
     );
   });

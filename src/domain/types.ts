@@ -4,13 +4,7 @@ export type MarketCode = "SH" | "SZ" | "BJ" | "UNKNOWN";
 export type DataSource = "eastmoney" | "tencent" | "official" | "mixed" | "local";
 export type LiveQuoteSource = "eastmoney" | "tencent";
 export type QuoteQualityState = "fresh" | "fallback" | "stale" | "retained" | "conflict";
-export type MarketSessionState =
-  | "trading"
-  | "preopen"
-  | "lunch"
-  | "closed"
-  | "holiday"
-  | "weekend";
+export type MarketSessionState = "trading" | "preopen" | "lunch" | "closed" | "holiday" | "weekend";
 
 export interface QuoteQuality {
   state: QuoteQualityState;
@@ -84,14 +78,7 @@ export interface NewsSourceState {
 
 export type AlertPriority = "low" | "medium" | "high";
 export type NewsEventType =
-  | "earnings"
-  | "policy"
-  | "order"
-  | "management"
-  | "capital"
-  | "industry"
-  | "market"
-  | "other";
+  "earnings" | "policy" | "order" | "management" | "capital" | "industry" | "market" | "other";
 export type NewsRelation = "direct" | "industry" | "market" | "uncertain";
 export type NewsDirection = "positive" | "negative" | "neutral" | "mixed";
 export type NewsHorizon = "intraday" | "short" | "medium" | "long";
@@ -204,7 +191,16 @@ export interface IntradayPoint {
   time: string;
   price: number;
   average: number | null;
+  /**
+   * 当日**累计**成交量（手），不是该分钟的成交量。
+   *
+   * 两个来源的原始口径不同，解析时必须对齐（已实测确认）：
+   * 东财 `trends2` 的 `parts[5]` 是每分钟成交量（全天求和恰好等于当日总量），
+   * 需要在解析时累加；腾讯 `minute/query` 的 `parts[2]` 本身已是累计值，直接用。
+   * 两边最终都必须是累计值，图表成交量才不随 fallback 换源而变化。
+   */
   volume: number | null;
+  /** 当日**累计**成交额（元），口径同上。 */
   amount: number | null;
 }
 

@@ -22,9 +22,7 @@ export function quoteTargetIntervalMs(context: QuoteRefreshContext): number {
       ? STANDARD_FOREGROUND_QUOTE_INTERVAL_MS
       : STANDARD_BACKGROUND_QUOTE_INTERVAL_MS;
   }
-  return context.foreground
-    ? FOREGROUND_QUOTE_INTERVAL_MS
-    : BACKGROUND_QUOTE_INTERVAL_MS;
+  return context.foreground ? FOREGROUND_QUOTE_INTERVAL_MS : BACKGROUND_QUOTE_INTERVAL_MS;
 }
 
 export function startToStartDelayMs(

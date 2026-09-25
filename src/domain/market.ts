@@ -1,9 +1,4 @@
-import type {
-  DailyCandle,
-  MarketInstrument,
-  MarketOverview,
-  MarketSeries
-} from "./types.js";
+import type { DailyCandle, MarketInstrument, MarketOverview, MarketSeries } from "./types.js";
 
 export const DEFAULT_MARKET_INDICES: MarketInstrument[] = [
   { key: "index:SH:000001", kind: "index", code: "000001", market: "SH", name: "上证" },
@@ -24,16 +19,11 @@ export function eastmoneySecid(instrument: MarketInstrument): string {
 }
 
 export function tencentSymbol(instrument: MarketInstrument): string {
-  const prefix = instrument.market === "SH" ? "sh" :
-    instrument.market === "BJ" ? "bj" : "sz";
+  const prefix = instrument.market === "SH" ? "sh" : instrument.market === "BJ" ? "bj" : "sz";
   return prefix + instrument.code;
 }
 
-export function withBoll(
-  candles: DailyCandle[],
-  period = 20,
-  multiplier = 2
-): DailyCandle[] {
+export function withBoll(candles: DailyCandle[], period = 20, multiplier = 2): DailyCandle[] {
   return candles.map((candle, index) => {
     if (index + 1 < period) return clearBoll(candle);
     const window = candles.slice(index + 1 - period, index + 1).map((item) => item.close);

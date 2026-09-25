@@ -5,7 +5,11 @@ const codes = (process.env.BENCHMARK_CODES ?? "600519,000001,300750,000858")
   .map((code) => code.trim())
   .filter(Boolean);
 const intervalMs = clamp(Number(process.env.BENCHMARK_INTERVAL_MS ?? 3_000), 3_000, 60_000);
-const durationMs = clamp(Number(process.env.BENCHMARK_DURATION_MS ?? 60_000), intervalMs, 3_600_000);
+const durationMs = clamp(
+  Number(process.env.BENCHMARK_DURATION_MS ?? 60_000),
+  intervalMs,
+  3_600_000
+);
 const preferred = process.env.BENCHMARK_PROVIDER === "tencent" ? "tencent" : "eastmoney";
 const coordinator = new QuoteCoordinator();
 const samples = [];
@@ -20,9 +24,15 @@ while (Date.now() - startedAt < durationMs) {
       nowMs: cycleStartedAt,
       maxSourceAgeMs: 60_000
     });
-    const fingerprint = JSON.stringify(result.quotes.map((quote) => [
-      quote.code, quote.price, quote.changePercent, quote.volume, quote.amount
-    ]));
+    const fingerprint = JSON.stringify(
+      result.quotes.map((quote) => [
+        quote.code,
+        quote.price,
+        quote.changePercent,
+        quote.volume,
+        quote.amount
+      ])
+    );
     samples.push({
       at: new Date(cycleStartedAt).toISOString(),
       latencyMs: Date.now() - cycleStartedAt,
@@ -55,22 +65,28 @@ while (Date.now() - startedAt < durationMs) {
 const latencies = samples.map((sample) => sample.latencyMs).sort((a, b) => a - b);
 const changedCount = samples.filter((sample) => sample.changed).length;
 const failureCount = samples.filter((sample) => sample.failures.length > 0).length;
-console.log(JSON.stringify({
-  startedAt: new Date(startedAt).toISOString(),
-  completedAt: new Date().toISOString(),
-  codes,
-  preferred,
-  intervalMs,
-  durationMs,
-  attempts: samples.length,
-  successRate: samples.length > 0 ? (samples.length - failureCount) / samples.length : 0,
-  averageCoverage: average(samples.map((sample) => sample.coverage)),
-  changedRate: samples.length > 0 ? changedCount / samples.length : 0,
-  latencyP50Ms: percentile(latencies, 0.5),
-  latencyP95Ms: percentile(latencies, 0.95),
-  conflicts: samples.reduce((sum, sample) => sum + sample.conflictCount, 0),
-  samples
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      startedAt: new Date(startedAt).toISOString(),
+      completedAt: new Date().toISOString(),
+      codes,
+      preferred,
+      intervalMs,
+      durationMs,
+      attempts: samples.length,
+      successRate: samples.length > 0 ? (samples.length - failureCount) / samples.length : 0,
+      averageCoverage: average(samples.map((sample) => sample.coverage)),
+      changedRate: samples.length > 0 ? changedCount / samples.length : 0,
+      latencyP50Ms: percentile(latencies, 0.5),
+      latencyP95Ms: percentile(latencies, 0.95),
+      conflicts: samples.reduce((sum, sample) => sum + sample.conflictCount, 0),
+      samples
+    },
+    null,
+    2
+  )
+);
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min));

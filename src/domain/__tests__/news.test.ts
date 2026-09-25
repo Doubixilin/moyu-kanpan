@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { NewsAnalysis, NewsItem } from "../types";
-import {
-  aggregateNewsSource,
-  dedupeNewsItems,
-  hasLimitedNewsMaterial,
-  importantDriverDecision
-} from "../news";
+import { aggregateNewsSource, hasLimitedNewsMaterial, importantDriverDecision } from "../news";
 
 function analyzed(patch: Partial<NewsAnalysis> = {}): NewsAnalysis {
   return {
@@ -49,42 +44,22 @@ const driverItem: NewsItem = {
 
 describe("news domain", () => {
   it("reports the aggregate event-library source instead of only the latest poll", () => {
-    assert.equal(aggregateNewsSource([{
-      ...driverItem,
-      source: "cninfo",
-      sources: ["cninfo", "eastmoney"],
-      sourceTier: "official"
-    }], ["eastmoney"]), "mixed");
+    assert.equal(
+      aggregateNewsSource(
+        [
+          {
+            ...driverItem,
+            source: "cninfo",
+            sources: ["cninfo", "eastmoney"],
+            sourceTier: "official"
+          }
+        ],
+        ["eastmoney"]
+      ),
+      "mixed"
+    );
     assert.equal(aggregateNewsSource([], ["cninfo"]), "official");
     assert.equal(aggregateNewsSource([], []), "local");
-  });
-
-  it("deduplicates news by url and normalized title while keeping newest items", () => {
-    const items = [
-      {
-        id: "1",
-        title: " 贵州茅台：今日上涨 ",
-        url: "https://example.com/a",
-        source: "eastmoney",
-        publishedAt: "2026-07-09T09:30:00.000Z"
-      },
-      {
-        id: "2",
-        title: "贵州茅台：今日上涨",
-        url: "https://example.com/a",
-        source: "eastmoney",
-        publishedAt: "2026-07-09T09:31:00.000Z"
-      },
-      {
-        id: "3",
-        title: "贵州茅台：今日上涨",
-        url: "https://example.com/b",
-        source: "tencent",
-        publishedAt: "2026-07-09T09:32:00.000Z"
-      }
-    ];
-
-    assert.deepEqual(dedupeNewsItems(items).map((item) => item.id), ["3"]);
   });
 
   it("only displays personally relevant or truly market-wide important drivers", () => {
@@ -161,7 +136,8 @@ describe("news domain", () => {
     assert.equal(
       hasLimitedNewsMaterial({
         ...driverItem,
-        summary: "这是较完整的新闻正文摘要，包含事件主体、时间、事实依据、相关金额、当前状态以及仍待确认的后续条件。"
+        summary:
+          "这是较完整的新闻正文摘要，包含事件主体、时间、事实依据、相关金额、当前状态以及仍待确认的后续条件。"
       }),
       false
     );

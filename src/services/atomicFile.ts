@@ -4,6 +4,11 @@ import { randomUUID } from "node:crypto";
 
 export interface AtomicWriteOptions {
   backupPath?: string;
+  /**
+   * 是否 fsync 后再 rename（默认 true，保证掉电后内容完整）。
+   * 对可重建的缓存文件可以传 false，省掉一次 fsync。
+   */
+  flush?: boolean;
 }
 
 export async function atomicWriteText(
@@ -16,7 +21,7 @@ export async function atomicWriteText(
 
   const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await writeFile(tempPath, content, { encoding: "utf8", flush: true });
+    await writeFile(tempPath, content, { encoding: "utf8", flush: options.flush ?? true });
     await rename(tempPath, filePath);
   } finally {
     await rm(tempPath, { force: true }).catch(() => undefined);

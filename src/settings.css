@@ -150,11 +150,6 @@ input[type="checkbox"] {
   accent-color: #3f454d;
 }
 
-.code-input {
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.05em;
-}
-
 .row-actions {
   display: flex;
   gap: 4px;
@@ -230,12 +225,6 @@ input[type="checkbox"] {
 .form-row input,
 .form-row select {
   width: 100%;
-}
-
-.split-panel {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 26px;
 }
 
 .range-row {
@@ -358,10 +347,6 @@ footer {
 
   .field-grid {
     grid-template-columns: repeat(3, 1fr);
-  }
-
-  .split-panel {
-    grid-template-columns: 1fr;
   }
 
   .window-toggle-grid,

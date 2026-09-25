@@ -21,11 +21,12 @@ export function buildSanitizedEventContext(input: EventContextInput): string {
   const security = input.cue.relatedCode
     ? `${input.securityName ?? "标的"}（${input.cue.relatedCode}）`
     : "全市场事件";
-  const tracking = input.tracking === "holding"
-    ? "持仓关联"
-    : input.tracking === "watchlist"
-      ? "自选关联"
-      : "市场事件";
+  const tracking =
+    input.tracking === "holding"
+      ? "持仓关联"
+      : input.tracking === "watchlist"
+        ? "自选关联"
+        : "市场事件";
   const quote = input.quote
     ? `${formatNumber(input.quote.price)}，涨跌 ${formatPercent(input.quote.changePercent)}，` +
       `时间 ${input.quote.updatedAt ?? "未知"}，来源 ${input.quote.source}`
@@ -34,9 +35,12 @@ export function buildSanitizedEventContext(input: EventContextInput): string {
     ? `${input.benchmark.name} ${formatPercent(input.benchmark.changePercent)}，时间 ${input.benchmark.updatedAt ?? "未知"}`
     : "无可用基准行情";
   const alertLines = input.alerts.length
-    ? input.alerts.map((alert) =>
-        `- ${alert.title}（${alert.type}，${alert.mode === "shadow" ? "影子" : "正式"}，${alert.triggeredAt}）`
-      ).join("\n")
+    ? input.alerts
+        .map(
+          (alert) =>
+            `- ${alert.title}（${alert.type}，${alert.mode === "shadow" ? "影子" : "正式"}，${alert.triggeredAt}）`
+        )
+        .join("\n")
     : "- 无近期本地规则触发";
 
   return [

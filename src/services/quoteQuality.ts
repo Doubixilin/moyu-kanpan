@@ -52,9 +52,11 @@ export function validateQuote(
     }
   }
   if (positive(quote.price) && positive(quote.previousClose) && quote.changePercent != null) {
-    const expectedPercent = (quote.price - quote.previousClose) / quote.previousClose * 100;
-    if (!Number.isFinite(quote.changePercent) ||
-        Math.abs(quote.changePercent - expectedPercent) > 0.08) {
+    const expectedPercent = ((quote.price - quote.previousClose) / quote.previousClose) * 100;
+    if (
+      !Number.isFinite(quote.changePercent) ||
+      Math.abs(quote.changePercent - expectedPercent) > 0.08
+    ) {
       issues.push("change_percent_mismatch");
     }
   }
@@ -81,11 +83,7 @@ export function validateQuote(
   };
 }
 
-export function quotesConflict(
-  left: Quote,
-  right: Quote,
-  relativeTolerance = 0.003
-): boolean {
+export function quotesConflict(left: Quote, right: Quote, relativeTolerance = 0.003): boolean {
   if (!positive(left.price) || !positive(right.price)) return false;
   const scale = Math.max(Math.abs(left.price), Math.abs(right.price), 1);
   return Math.abs(left.price - right.price) > Math.max(0.02, scale * relativeTolerance);

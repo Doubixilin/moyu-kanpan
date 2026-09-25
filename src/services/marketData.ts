@@ -1,11 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { atomicWriteText } from "./atomicFile.js";
-import {
-  DEFAULT_MARKET_INDICES,
-  emptyMarketOverview,
-  emptySeries,
-  withBoll
-} from "../domain/market.js";
+import { DEFAULT_MARKET_INDICES, emptySeries, withBoll } from "../domain/market.js";
 import type {
   DailyCandle,
   DataSource,
@@ -73,6 +68,8 @@ export interface MarketDataOptions {
   overviewSectorLimit?: number;
   intradayTtlMs?: number;
   dailyTtlMs?: number;
+  /** 详情缓存最多保留多少个标的（按最近写入时间淘汰），默认 30。 */
+  detailsLimit?: number;
 }
 
 export interface FastIndexResult {
@@ -105,7 +102,8 @@ export class JsonMarketCache implements MarketCacheStore {
   }
 
   async write(value: MarketCacheData): Promise<void> {
-    await atomicWriteText(this.filePath, JSON.stringify(value));
+    // 行情缓存是可重建数据，不需要 fsync 落盘（省掉每次写入的一次 fsync）。
+    await atomicWriteText(this.filePath, JSON.stringify(value), { flush: false });
   }
 }
 
@@ -117,6 +115,10 @@ export class MarketDataCoordinator {
   private sectorFetchedAt = 0;
   private fastIndexResult: FastIndexResult | null = null;
   private fastIndexFetchedAt = 0;
+  /** 按 key 合并并发的相同请求；settle 后清除条目（成功与失败两条路径都会清）。 */
+  private readonly inFlight = new Map<string, Promise<unknown>>();
+  /** 缓存内容是否被改动过；只有改动才落盘，避免每次都全量重写整个缓存文件。 */
+  private cacheDirty = false;
 
   constructor(
     private readonly providers: MarketProviderSet = defaultProviders,
@@ -124,7 +126,28 @@ export class MarketDataCoordinator {
     private readonly options: MarketDataOptions = {}
   ) {}
 
+  private singleFlight<T>(key: string, task: () => Promise<T>): Promise<T> {
+    const existing = this.inFlight.get(key);
+    if (existing) return existing as Promise<T>;
+    const promise = task().finally(() => {
+      this.inFlight.delete(key);
+    });
+    this.inFlight.set(key, promise);
+    return promise;
+  }
+
   async fetchOverview(
+    preferred: LiveQuoteSource,
+    context: MarketFetchContext
+  ): Promise<MarketOverview> {
+    // 在途去重：主窗、表格窗与本地网页可能在同一个缓存窗口内各发起一次，
+    // 否则会重复请求全部指数/板块/分时数据（缓存未命中时 2 倍上游请求）。
+    return this.singleFlight(`overview:${preferred}`, () =>
+      this.fetchOverviewUncached(preferred, context)
+    );
+  }
+
+  private async fetchOverviewUncached(
     preferred: LiveQuoteSource,
     context: MarketFetchContext
   ): Promise<MarketOverview> {
@@ -132,9 +155,10 @@ export class MarketDataCoordinator {
     const cached = cache.overview?.value;
     const errors: string[] = [];
     const nowMs = context.nowMs ?? Date.now();
-    const indicesOutcome = this.fastIndexResult && nowMs - this.fastIndexFetchedAt <= 10_000
-      ? this.fastIndexResult
-      : await this.fetchIndices(preferred, context);
+    const indicesOutcome =
+      this.fastIndexResult && nowMs - this.fastIndexFetchedAt <= 10_000
+        ? this.fastIndexResult
+        : await this.fetchIndices(preferred, context);
     errors.push(...indicesOutcome.errors);
 
     let indices = indicesOutcome.items;
@@ -171,12 +195,7 @@ export class MarketDataCoordinator {
     }
 
     const previewInstrument = DEFAULT_MARKET_INDICES[0]!;
-    const intradayOutcome = await this.loadIntraday(
-      previewInstrument,
-      preferred,
-      context,
-      true
-    );
+    const intradayOutcome = await this.loadIntraday(previewInstrument, preferred, context, true);
     if (intradayOutcome.series.error) {
       errors.push(`intraday:${intradayOutcome.series.error}`);
     }
@@ -191,9 +210,14 @@ export class MarketDataCoordinator {
     ].filter((source): source is DataSource => source != null);
     const source = aggregateSources(sources);
     const stale = indicesCached || indices.length < DEFAULT_MARKET_INDICES.length;
-    const degraded = stale || sectorsCached || breadthCached ||
-      intradayOutcome.series.stale || sources.some((item) => item === "local") ||
-      errors.length > 0 || source === "mixed";
+    const degraded =
+      stale ||
+      sectorsCached ||
+      breadthCached ||
+      intradayOutcome.series.stale ||
+      sources.some((item) => item === "local") ||
+      errors.length > 0 ||
+      source === "mixed";
     const updatedAt = newestTimestamp([
       ...indices.map((item) => item.updatedAt),
       intradayOutcome.series.updatedAt
@@ -213,6 +237,7 @@ export class MarketDataCoordinator {
 
     if (!indicesCached && indices.length > 0) {
       cache.overview = { savedAt: new Date().toISOString(), value: overview };
+      this.cacheDirty = true;
       await this.persistCache();
     }
     return overview;
@@ -231,6 +256,18 @@ export class MarketDataCoordinator {
   }
 
   async fetchDetail(
+    instrument: MarketInstrument,
+    preferred: LiveQuoteSource,
+    context: MarketFetchContext
+  ): Promise<MarketDetail> {
+    // 同一标的在缓存窗口内的并发请求合并为一次：本地网页 /api/trend 与 IPC market:detail
+    // 会请求同一个标的，此前两边都未命中缓存就会各自拉一遍分时 + 日 K。
+    return this.singleFlight(`detail:${instrument.key}:${preferred}`, () =>
+      this.fetchDetailUncached(instrument, preferred, context)
+    );
+  }
+
+  private async fetchDetailUncached(
     instrument: MarketInstrument,
     preferred: LiveQuoteSource,
     context: MarketFetchContext
@@ -254,9 +291,8 @@ export class MarketDataCoordinator {
     preferred: LiveQuoteSource,
     context: MarketFetchContext
   ): Promise<{ items: MarketIndexQuote[]; source: DataSource | null; errors: string[] }> {
-    const order: LiveQuoteSource[] = preferred === "eastmoney"
-      ? ["eastmoney", "tencent"]
-      : ["tencent", "eastmoney"];
+    const order: LiveQuoteSource[] =
+      preferred === "eastmoney" ? ["eastmoney", "tencent"] : ["tencent", "eastmoney"];
     const errors: string[] = [];
     const selected = new Map<string, MarketIndexQuote>();
     const usedSources = new Set<LiveQuoteSource>();
@@ -265,12 +301,16 @@ export class MarketDataCoordinator {
       const missing = DEFAULT_MARKET_INDICES.filter((item) => !selected.has(item.key));
       if (missing.length === 0) break;
       try {
-        const items = source === "eastmoney"
-          ? await this.providers.eastmoneyIndices(missing)
-          : await this.providers.tencentIndices(missing);
+        const items =
+          source === "eastmoney"
+            ? await this.providers.eastmoneyIndices(missing)
+            : await this.providers.tencentIndices(missing);
         for (const item of items) {
-          if (!missing.some((instrument) => instrument.key === item.instrument.key) ||
-              !validIndex(item, context)) continue;
+          if (
+            !missing.some((instrument) => instrument.key === item.instrument.key) ||
+            !validIndex(item, context)
+          )
+            continue;
           selected.set(item.instrument.key, item);
           usedSources.add(source);
         }
@@ -302,16 +342,20 @@ export class MarketDataCoordinator {
     const cachedDetail = cache.details[instrument.key];
     const cached = cachedDetail?.intraday;
     const nowMs = context.nowMs ?? Date.now();
-    if (allowFreshCache && cached &&
-        nowMs - Date.parse(cached.savedAt) < (this.options.intradayTtlMs ?? 25_000)) {
+    if (
+      allowFreshCache &&
+      cached &&
+      nowMs - Date.parse(cached.savedAt) < (this.options.intradayTtlMs ?? 25_000)
+    ) {
       return { name: cachedDetail.name, series: cached.value };
     }
 
     const outcome = await this.fetchSeries<IntradayPoint, IntradayProviderResult>(
       preferred,
-      (source) => source === "eastmoney"
-        ? this.providers.eastmoneyIntraday(instrument)
-        : this.providers.tencentIntraday(instrument),
+      (source) =>
+        source === "eastmoney"
+          ? this.providers.eastmoneyIntraday(instrument)
+          : this.providers.tencentIntraday(instrument),
       (result) => result.items.length > 0 && validIntraday(result, context),
       (result, source, error) => ({
         items: result.items,
@@ -327,6 +371,7 @@ export class MarketDataCoordinator {
       detail.name = outcome.result.name || detail.name;
       detail.intraday = { savedAt: new Date(nowMs).toISOString(), value: outcome.series };
       cache.details[instrument.key] = detail;
+      this.cacheDirty = true;
       return { name: detail.name, series: outcome.series };
     }
 
@@ -354,9 +399,10 @@ export class MarketDataCoordinator {
 
     const outcome = await this.fetchSeries<DailyCandle, DailyProviderResult>(
       preferred,
-      (source) => source === "eastmoney"
-        ? this.providers.eastmoneyDaily(instrument, 120)
-        : this.providers.tencentDaily(instrument, 120),
+      (source) =>
+        source === "eastmoney"
+          ? this.providers.eastmoneyDaily(instrument, 120)
+          : this.providers.tencentDaily(instrument, 120),
       (result) => result.items.length >= 20,
       (result, source, error) => ({
         items: withBoll(result.items),
@@ -372,6 +418,7 @@ export class MarketDataCoordinator {
       detail.name = outcome.result.name || detail.name;
       detail.daily = { savedAt: new Date(nowMs).toISOString(), value: outcome.series };
       cache.details[instrument.key] = detail;
+      this.cacheDirty = true;
       return { name: detail.name, series: outcome.series };
     }
 
@@ -388,15 +435,10 @@ export class MarketDataCoordinator {
     preferred: LiveQuoteSource,
     fetcher: (source: LiveQuoteSource) => Promise<TResult>,
     validator: (result: TResult) => boolean,
-    toSeries: (
-      result: TResult,
-      source: LiveQuoteSource,
-      error: string | null
-    ) => MarketSeries<T>
+    toSeries: (result: TResult, source: LiveQuoteSource, error: string | null) => MarketSeries<T>
   ): Promise<{ result: TResult; series: MarketSeries<T> } | null> {
-    const order: LiveQuoteSource[] = preferred === "eastmoney"
-      ? ["eastmoney", "tencent"]
-      : ["tencent", "eastmoney"];
+    const order: LiveQuoteSource[] =
+      preferred === "eastmoney" ? ["eastmoney", "tencent"] : ["tencent", "eastmoney"];
     const failures: string[] = [];
     for (const source of order) {
       try {
@@ -417,12 +459,7 @@ export class MarketDataCoordinator {
     if (this.cache) return this.cache;
     if (!this.cacheLoad) {
       this.cacheLoad = (async () => {
-        let loaded: MarketCacheData | null = null;
-        try {
-          loaded = await this.cacheStore?.read() ?? null;
-        } catch {
-          loaded = null;
-        }
+        const loaded = await this.cacheStore?.read().catch(() => null);
         this.cache = loaded ?? { version: 1, details: {} };
         return this.cache;
       })();
@@ -431,7 +468,9 @@ export class MarketDataCoordinator {
   }
 
   private async persistCache(): Promise<void> {
-    if (!this.cacheStore || !this.cache) return;
+    if (!this.cacheStore || !this.cache || !this.cacheDirty) return;
+    this.cacheDirty = false;
+    this.pruneDetails(this.cache);
     const snapshot = structuredClone(this.cache);
     this.persistQueue = this.persistQueue
       .then(() => this.cacheStore!.write(snapshot))
@@ -439,6 +478,31 @@ export class MarketDataCoordinator {
         // Cache failures must never take down live market data.
       });
     await this.persistQueue;
+  }
+
+  /**
+   * 详情缓存按最近写入时间保留上限条数。
+   * 此前该表只增不减：浏览 N 个标的就会永久保留 N ×（约 120 根日 K + 约 240 个分时点），
+   * 内存与 market-cache.json 都随时间线性增长。
+   */
+  private pruneDetails(cache: MarketCacheData): void {
+    const limit = Math.max(1, Math.floor(this.options.detailsLimit ?? 30));
+    const keys = Object.keys(cache.details);
+    if (keys.length <= limit) return;
+    const recency = (key: string): number => {
+      const detail = cache.details[key];
+      if (!detail) return 0;
+      return Math.max(
+        Date.parse(detail.intraday?.savedAt ?? "") || 0,
+        Date.parse(detail.daily?.savedAt ?? "") || 0
+      );
+    };
+    keys
+      .sort((left, right) => recency(left) - recency(right))
+      .slice(0, keys.length - limit)
+      .forEach((key) => {
+        delete cache.details[key];
+      });
   }
 }
 
@@ -451,10 +515,7 @@ function validIndex(item: MarketIndexQuote, context: MarketFetchContext): boolea
   return Number.isFinite(timestamp) && (context.nowMs ?? Date.now()) - timestamp <= maxAge;
 }
 
-function validIntraday(
-  result: IntradayProviderResult,
-  context: MarketFetchContext
-): boolean {
+function validIntraday(result: IntradayProviderResult, context: MarketFetchContext): boolean {
   if (result.items.length === 0) return false;
   if (!context.marketOpen) return true;
   if (!result.updatedAt) return false;
@@ -464,9 +525,8 @@ function validIntraday(
 }
 
 function buildBreadth(indices: MarketIndexQuote[]): MarketBreadth {
-  const broad = indices.filter((item) =>
-    item.instrument.key === "index:SH:000001" ||
-    item.instrument.key === "index:SZ:399001"
+  const broad = indices.filter(
+    (item) => item.instrument.key === "index:SH:000001" || item.instrument.key === "index:SZ:399001"
   );
   return {
     upCount: sumNullable(broad.map((item) => item.upCount)),

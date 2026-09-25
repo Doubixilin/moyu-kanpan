@@ -1,18 +1,10 @@
 import { hasLimitedNewsMaterial } from "./news.js";
-import type {
-  NewsAnalysis,
-  NewsDirection,
-  NewsEventType,
-  NewsItem
-} from "./types.js";
+import type { NewsAnalysis, NewsDirection, NewsEventType, NewsItem } from "./types.js";
 
 const HIGH_KEYWORDS = ["政策", "证监会", "重磅", "业绩", "预增", "并购", "停牌", "复牌"];
 const MEDIUM_KEYWORDS = ["公告", "减持", "增持", "回购", "订单", "中标", "调研"];
 
-export function analyzeNewsWithRules(
-  item: NewsItem,
-  failureReason?: string
-): NewsAnalysis {
+export function analyzeNewsWithRules(item: NewsItem, failureReason?: string): NewsAnalysis {
   const text = `${item.title} ${item.summary ?? ""}`;
   const highMatches = HIGH_KEYWORDS.filter((keyword) => text.includes(keyword));
   const mediumMatches = MEDIUM_KEYWORDS.filter((keyword) => text.includes(keyword));
@@ -27,9 +19,9 @@ export function analyzeNewsWithRules(
     useful: priority !== "low",
     eventType: inferEventType(text),
     relatedCodes: [...new Set((item.relatedCodes ?? []).filter((code) => /^\d{6}$/.test(code)))],
-    sourceRelatedCodes: [...new Set(
-      (item.relatedCodes ?? []).filter((code) => /^\d{6}$/.test(code))
-    )],
+    sourceRelatedCodes: [
+      ...new Set((item.relatedCodes ?? []).filter((code) => /^\d{6}$/.test(code)))
+    ],
     inferredRelatedCodes: [],
     relation: item.relatedCodes?.length ? "direct" : "uncertain",
     direction: inferDirection(text),

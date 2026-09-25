@@ -30,11 +30,16 @@ export function buildExcelBollChart(
   ]);
   const min = Math.min(...values);
   const max = Math.max(...values);
-  const x = (index: number) => plot.left + index / (items.length - 1) * (width - plot.left - plot.right);
-  const y = (value: number) => plot.top + (max - value) / (max - min || 1) * (height - plot.top - plot.bottom);
-  const points = (field: "close" | "bollUpper" | "bollMid" | "bollLower") => items
-    .flatMap((item, index) => item[field] == null ? [] : [`${x(index).toFixed(1)},${y(item[field]!).toFixed(1)}`])
-    .join(" ");
+  const x = (index: number) =>
+    plot.left + (index / (items.length - 1)) * (width - plot.left - plot.right);
+  const y = (value: number) =>
+    plot.top + ((max - value) / (max - min || 1)) * (height - plot.top - plot.bottom);
+  const points = (field: "close" | "bollUpper" | "bollMid" | "bollLower") =>
+    items
+      .flatMap((item, index) =>
+        item[field] == null ? [] : [`${x(index).toFixed(1)},${y(item[field]!).toFixed(1)}`]
+      )
+      .join(" ");
   return {
     width,
     height,

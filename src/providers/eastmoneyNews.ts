@@ -30,8 +30,10 @@ export function parseEastmoneyFastNews(payload: unknown): NewsItem[] {
       source: "eastmoney",
       sourceTier: "media" as const,
       documentType: "fast_news" as const,
-      materialStatus: (row.summary?.replace(/\s+/g, "").length ?? 0) >= 40
-        ? "full" as const : "title_only" as const,
+      materialStatus:
+        (row.summary?.replace(/\s+/g, "").length ?? 0) >= 40
+          ? ("full" as const)
+          : ("title_only" as const),
       publishedAt: parseEastmoneyTime(row.showTime),
       fetchedAt: new Date().toISOString(),
       relatedCodes: normalizeRelatedCodes(row.stockList)
@@ -40,12 +42,16 @@ export function parseEastmoneyFastNews(payload: unknown): NewsItem[] {
 
 function normalizeRelatedCodes(values: string[] | undefined): string[] {
   if (!Array.isArray(values)) return [];
-  return [...new Set(values.flatMap((value) => {
-    const normalized = String(value).trim();
-    if (/^\d{6}$/.test(normalized)) return [normalized];
-    const secid = normalized.match(/^[01]\.(\d{6})$/);
-    return secid ? [secid[1]!] : [];
-  }))];
+  return [
+    ...new Set(
+      values.flatMap((value) => {
+        const normalized = String(value).trim();
+        if (/^\d{6}$/.test(normalized)) return [normalized];
+        const secid = normalized.match(/^[01]\.(\d{6})$/);
+        return secid ? [secid[1]!] : [];
+      })
+    )
+  ];
 }
 
 export async function fetchEastmoneyFastNews(fetcher = fetch, pageSize = 30): Promise<NewsItem[]> {
@@ -57,12 +63,17 @@ export async function fetchEastmoneyFastNews(fetcher = fetch, pageSize = 30): Pr
   url.searchParams.set("sortEnd", "0");
   url.searchParams.set("req_trace", "fontendmask");
 
-  const response = await fetchWithTimeout(fetcher, url, {
-    headers: {
-      Referer: "https://kuaixun.eastmoney.com/",
-      "User-Agent": "Mozilla/5.0"
-    }
-  }, 10_000);
+  const response = await fetchWithTimeout(
+    fetcher,
+    url,
+    {
+      headers: {
+        Referer: "https://kuaixun.eastmoney.com/",
+        "User-Agent": "Mozilla/5.0"
+      }
+    },
+    10_000
+  );
   if (!response.ok) throw new Error(`Eastmoney fast news failed: ${response.status}`);
   return parseEastmoneyFastNews(await response.json());
 }

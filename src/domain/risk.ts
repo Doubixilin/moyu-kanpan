@@ -24,6 +24,12 @@ export interface AlertCandidate {
   securityCode?: string;
   groupId?: string;
   value: number;
+  /**
+   * 阈值。损失类规则（`daily_loss`/`fall_percent`/`total_loss`/`group_loss` 等）这里是
+   * **负数**：它让损失规则复用 `direction: "above"` 的穿越判定与迟滞逻辑
+   * （见 `risk.test.ts` 的 `daily_loss → -50` 断言）。
+   * 这是内部表示，**不要**直接展示给用户——需要显示时应取绝对值。
+   */
   threshold: number;
   direction: "above" | "below";
   hysteresis: number;
@@ -33,17 +39,21 @@ export interface AlertCandidate {
 export function calculateRiskSnapshot(input: RiskCalculationInput): RiskSnapshot {
   const { settings } = input;
   const quoteMap = new Map(input.quotes.map((quote) => [quote.code, quote]));
-  const nameMap = new Map(settings.securities.map((security) => [
-    security.code,
-    security.alias || security.name || security.code
-  ]));
-  const holdings = settings.holdings.map((holding) => calculateHolding(
-    holding,
-    nameMap.get(holding.securityCode) ?? holding.securityCode,
-    quoteMap.get(holding.securityCode),
-    settings.risk,
-    input.feedHealthy
-  ));
+  const nameMap = new Map(
+    settings.securities.map((security) => [
+      security.code,
+      security.alias || security.name || security.code
+    ])
+  );
+  const holdings = settings.holdings.map((holding) =>
+    calculateHolding(
+      holding,
+      nameMap.get(holding.securityCode) ?? holding.securityCode,
+      quoteMap.get(holding.securityCode),
+      settings.risk,
+      input.feedHealthy
+    )
+  );
   const groups = calculateGroups(holdings, settings.risk);
   const portfolio = calculatePortfolio(holdings, settings.risk);
   return {
@@ -72,9 +82,13 @@ export function buildAlertCandidates(
       addHoldingCandidates(candidates, holding, metric, settings.risk);
     }
     addCandidate(candidates, settings.risk.maxPositionValue, {
-      ruleId: `holding:${holding.securityCode}:position`, type: "position_value",
-      title: `${metric.name}超过单一持仓上限`, message: moneyMessage("当前市值", metric.marketValue),
-      securityCode: holding.securityCode, value: metric.marketValue, direction: "above",
+      ruleId: `holding:${holding.securityCode}:position`,
+      type: "position_value",
+      title: `${metric.name}超过单一持仓上限`,
+      message: moneyMessage("当前市值", metric.marketValue),
+      securityCode: holding.securityCode,
+      value: metric.marketValue,
+      direction: "above",
       safe: metric.dataSafe,
       hysteresis: moneyHysteresis(settings.risk.maxPositionValue, settings.risk)
     });
@@ -190,51 +204,60 @@ function calculateHolding(
   const quoteSafe = isQuoteAlertSafe(quote);
   const dataSafe = feedHealthy && quoteSafe && price != null && previousClose != null;
   const marketValue = price == null ? null : price * holding.quantity;
-  const dailyPnl = price == null || previousClose == null
-    ? null
-    : (price - previousClose) * holding.quantity;
+  const dailyPnl =
+    price == null || previousClose == null ? null : (price - previousClose) * holding.quantity;
   const totalPnl = price == null ? null : (price - holding.costPrice) * holding.quantity;
-  const totalPnlPercent = price == null
-    ? null
-    : (price - holding.costPrice) / holding.costPrice * 100;
+  const totalPnlPercent =
+    price == null ? null : ((price - holding.costPrice) / holding.costPrice) * 100;
   const stop = holding.alertRules.stopLossPrice;
-  const plannedRiskAmount = stop != null && stop < holding.costPrice
-    ? (holding.costPrice - stop) * holding.quantity
-    : null;
-  const stopDistancePercent = price != null && stop != null
-    ? (price - stop) / price * 100
-    : null;
-  const watchDistancePercent = price != null && holding.alertRules.watchPrice != null
-    ? (holding.alertRules.watchPrice - price) / price * 100
-    : null;
+  const plannedRiskAmount =
+    stop != null && stop < holding.costPrice ? (holding.costPrice - stop) * holding.quantity : null;
+  const stopDistancePercent = price != null && stop != null ? ((price - stop) / price) * 100 : null;
+  const watchDistancePercent =
+    price != null && holding.alertRules.watchPrice != null
+      ? ((holding.alertRules.watchPrice - price) / price) * 100
+      : null;
   const violations: RiskViolation[] = [];
-  if (dataSafe && marketValue != null && risk.maxPositionValue != null &&
-      marketValue > risk.maxPositionValue) {
-    violations.push(violation(
-      `holding:${holding.securityCode}:position`,
-      "breach",
-      `${name}超过单一持仓上限`,
-      `${formatMoney(marketValue)} > ${formatMoney(risk.maxPositionValue)}`,
-      holding.securityCode
-    ));
+  if (
+    dataSafe &&
+    marketValue != null &&
+    risk.maxPositionValue != null &&
+    marketValue > risk.maxPositionValue
+  ) {
+    violations.push(
+      violation(
+        `holding:${holding.securityCode}:position`,
+        "breach",
+        `${name}超过单一持仓上限`,
+        `${formatMoney(marketValue)} > ${formatMoney(risk.maxPositionValue)}`,
+        holding.securityCode
+      )
+    );
   }
   if (dataSafe && stopDistancePercent != null && stopDistancePercent <= 0) {
-    violations.push(violation(
-      `holding:${holding.securityCode}:stop`,
-      "breach",
-      `${name}触及止损线`,
-      `现价 ${formatNumber(price)}，止损 ${formatNumber(stop)}`,
-      holding.securityCode
-    ));
-  } else if (dataSafe && stopDistancePercent != null &&
-      stopDistancePercent <= risk.stopWarningPercent) {
-    violations.push(violation(
-      `holding:${holding.securityCode}:near-stop`,
-      "warning",
-      `${name}接近止损线`,
-      `距离 ${formatNumber(stopDistancePercent)}%`,
-      holding.securityCode
-    ));
+    violations.push(
+      violation(
+        `holding:${holding.securityCode}:stop`,
+        "breach",
+        `${name}触及止损线`,
+        `现价 ${formatNumber(price)}，止损 ${formatNumber(stop)}`,
+        holding.securityCode
+      )
+    );
+  } else if (
+    dataSafe &&
+    stopDistancePercent != null &&
+    stopDistancePercent <= risk.stopWarningPercent
+  ) {
+    violations.push(
+      violation(
+        `holding:${holding.securityCode}:near-stop`,
+        "warning",
+        `${name}接近止损线`,
+        `距离 ${formatNumber(stopDistancePercent)}%`,
+        holding.securityCode
+      )
+    );
   }
   return {
     securityCode: holding.securityCode,
@@ -264,35 +287,50 @@ function calculatePortfolio(
   const marketValue = sumComplete(holdings.map((item) => item.marketValue));
   const dailyPnl = sumComplete(holdings.map((item) => item.dailyPnl));
   const totalPnl = sumComplete(holdings.map((item) => item.totalPnl));
-  const exposurePercent = marketValue != null && risk.accountBaseline != null
-    ? marketValue / risk.accountBaseline * 100
-    : null;
+  const exposurePercent =
+    marketValue != null && risk.accountBaseline != null
+      ? (marketValue / risk.accountBaseline) * 100
+      : null;
   const violations = holdings.flatMap((item) => item.violations);
   if (risk.maxHoldingCount != null && holdings.length > risk.maxHoldingCount) {
-    violations.push(violation(
-      "portfolio:holding-count",
-      "breach",
-      "持仓数量超过上限",
-      `${holdings.length} > ${risk.maxHoldingCount}`
-    ));
+    violations.push(
+      violation(
+        "portfolio:holding-count",
+        "breach",
+        "持仓数量超过上限",
+        `${holdings.length} > ${risk.maxHoldingCount}`
+      )
+    );
   }
-  if (dataSafe && exposurePercent != null && risk.maxTotalExposurePercent != null &&
-      exposurePercent > risk.maxTotalExposurePercent) {
-    violations.push(violation(
-      "portfolio:exposure",
-      "breach",
-      "总持仓比例超过上限",
-      `${formatNumber(exposurePercent)}% > ${formatNumber(risk.maxTotalExposurePercent)}%`
-    ));
+  if (
+    dataSafe &&
+    exposurePercent != null &&
+    risk.maxTotalExposurePercent != null &&
+    exposurePercent > risk.maxTotalExposurePercent
+  ) {
+    violations.push(
+      violation(
+        "portfolio:exposure",
+        "breach",
+        "总持仓比例超过上限",
+        `${formatNumber(exposurePercent)}% > ${formatNumber(risk.maxTotalExposurePercent)}%`
+      )
+    );
   }
-  if (dataSafe && dailyPnl != null && risk.portfolioDailyLossThreshold != null &&
-      dailyPnl <= -risk.portfolioDailyLossThreshold) {
-    violations.push(violation(
-      "portfolio:daily-loss",
-      "breach",
-      "持仓合计今日亏损达到停手阈值",
-      formatMoney(dailyPnl)
-    ));
+  if (
+    dataSafe &&
+    dailyPnl != null &&
+    risk.portfolioDailyLossThreshold != null &&
+    dailyPnl <= -risk.portfolioDailyLossThreshold
+  ) {
+    violations.push(
+      violation(
+        "portfolio:daily-loss",
+        "breach",
+        "持仓合计今日亏损达到停手阈值",
+        formatMoney(dailyPnl)
+      )
+    );
   }
   return {
     holdingCount: holdings.length,
@@ -307,10 +345,7 @@ function calculatePortfolio(
   };
 }
 
-function calculateGroups(
-  holdings: HoldingRiskMetrics[],
-  risk: RiskSettings
-): RiskGroupMetrics[] {
+function calculateGroups(holdings: HoldingRiskMetrics[], risk: RiskSettings): RiskGroupMetrics[] {
   return risk.groups.map((group) => {
     const members = holdings.filter((holding) => holding.groupId === group.id);
     const dataSafe = members.length > 0 && members.every((item) => item.dataSafe);
@@ -318,12 +353,22 @@ function calculateGroups(
     const dailyPnl = sumComplete(members.map((item) => item.dailyPnl));
     const totalPnl = sumComplete(members.map((item) => item.totalPnl));
     const violations: RiskViolation[] = [];
-    if (group.enabled && dataSafe && totalPnl != null && group.profitThreshold != null &&
-        totalPnl >= group.profitThreshold) {
+    if (
+      group.enabled &&
+      dataSafe &&
+      totalPnl != null &&
+      group.profitThreshold != null &&
+      totalPnl >= group.profitThreshold
+    ) {
       violations.push(groupViolation(group.id, group.name, "profit", totalPnl));
     }
-    if (group.enabled && dataSafe && totalPnl != null && group.lossThreshold != null &&
-        totalPnl <= -group.lossThreshold) {
+    if (
+      group.enabled &&
+      dataSafe &&
+      totalPnl != null &&
+      group.lossThreshold != null &&
+      totalPnl <= -group.lossThreshold
+    ) {
       violations.push(groupViolation(group.id, group.name, "loss", totalPnl));
     }
     return {
@@ -348,28 +393,42 @@ function addHoldingCandidates(
   const rules = holding.alertRules;
   const code = holding.securityCode;
   const priceHysteresis = (threshold: number | null) =>
-    Math.max(0.01, (threshold ?? 0) * risk.hysteresisPercent / 100);
+    Math.max(0.01, ((threshold ?? 0) * risk.hysteresisPercent) / 100);
   addCandidate(candidates, rules.stopLossPrice, {
-    ruleId: `holding:${code}:stop-loss`, type: "stop_loss",
-    title: `${metric.name}跌破止损线`, message: priceMessage(metric, rules.stopLossPrice),
-    securityCode: code, value: metric.price, direction: "below", safe: metric.dataSafe,
+    ruleId: `holding:${code}:stop-loss`,
+    type: "stop_loss",
+    title: `${metric.name}跌破止损线`,
+    message: priceMessage(metric, rules.stopLossPrice),
+    securityCode: code,
+    value: metric.price,
+    direction: "below",
+    safe: metric.dataSafe,
     hysteresis: priceHysteresis(rules.stopLossPrice)
   });
   if (rules.stopLossPrice != null && metric.stopDistancePercent != null) {
     addCandidate(candidates, risk.stopWarningPercent, {
-      ruleId: `holding:${code}:near-stop`, type: "near_stop",
+      ruleId: `holding:${code}:near-stop`,
+      type: "near_stop",
       title: `${metric.name}进入止损预警区`,
       message: `距止损线 ${formatNumber(metric.stopDistancePercent)}%`,
-      securityCode: code, value: metric.stopDistancePercent, direction: "below",
-      safe: metric.dataSafe, hysteresis: Math.max(0.1, risk.stopWarningPercent * 0.1)
+      securityCode: code,
+      value: metric.stopDistancePercent,
+      direction: "below",
+      safe: metric.dataSafe,
+      hysteresis: Math.max(0.1, risk.stopWarningPercent * 0.1)
     });
   }
   if (rules.watchPrice != null) {
     const direction = rules.watchPrice >= holding.costPrice ? "above" : "below";
     addCandidate(candidates, rules.watchPrice, {
-      ruleId: `holding:${code}:watch`, type: "watch_price",
-      title: `${metric.name}到达观察线`, message: priceMessage(metric, rules.watchPrice),
-      securityCode: code, value: metric.price, direction, safe: metric.dataSafe,
+      ruleId: `holding:${code}:watch`,
+      type: "watch_price",
+      title: `${metric.name}到达观察线`,
+      message: priceMessage(metric, rules.watchPrice),
+      securityCode: code,
+      value: metric.price,
+      direction,
+      safe: metric.dataSafe,
       hysteresis: priceHysteresis(rules.watchPrice)
     });
   }
@@ -377,20 +436,60 @@ function addHoldingCandidates(
     [rules.priceAbove, "price-above", "price_above", "价格向上突破", metric.price, "above"],
     [rules.priceBelow, "price-below", "price_below", "价格向下跌破", metric.price, "below"],
     [rules.risePercent, "rise", "rise_percent", "今日涨幅达到阈值", metric.changePercent, "above"],
-    [rules.fallPercent, "fall", "fall_percent", "今日跌幅达到阈值", metric.changePercent, "below", true],
-    [rules.dailyProfitAmount, "daily-profit", "daily_profit", "今日盈利达到阈值", metric.dailyPnl, "above"],
-    [rules.dailyLossAmount, "daily-loss", "daily_loss", "今日亏损达到阈值", metric.dailyPnl, "below", true],
-    [rules.totalProfitAmount, "total-profit", "total_profit", "累计盈利达到阈值", metric.totalPnl, "above"],
-    [rules.totalLossAmount, "total-loss", "total_loss", "累计亏损达到阈值", metric.totalPnl, "below", true]
+    [
+      rules.fallPercent,
+      "fall",
+      "fall_percent",
+      "今日跌幅达到阈值",
+      metric.changePercent,
+      "below",
+      true
+    ],
+    [
+      rules.dailyProfitAmount,
+      "daily-profit",
+      "daily_profit",
+      "今日盈利达到阈值",
+      metric.dailyPnl,
+      "above"
+    ],
+    [
+      rules.dailyLossAmount,
+      "daily-loss",
+      "daily_loss",
+      "今日亏损达到阈值",
+      metric.dailyPnl,
+      "below",
+      true
+    ],
+    [
+      rules.totalProfitAmount,
+      "total-profit",
+      "total_profit",
+      "累计盈利达到阈值",
+      metric.totalPnl,
+      "above"
+    ],
+    [
+      rules.totalLossAmount,
+      "total-loss",
+      "total_loss",
+      "累计亏损达到阈值",
+      metric.totalPnl,
+      "below",
+      true
+    ]
   ] as const) {
     const [threshold, suffix, type, label, value, direction, negate] = definition;
     addCandidate(candidates, threshold, {
       ruleId: `holding:${code}:${suffix}`,
       type,
       title: `${metric.name}${label}`,
-      message: type.includes("price") ? priceMessage(metric, threshold) :
-        type.includes("percent") ? percentMessage("今日涨跌", metric.changePercent) :
-          moneyMessage("盈亏", value),
+      message: type.includes("price")
+        ? priceMessage(metric, threshold)
+        : type.includes("percent")
+          ? percentMessage("今日涨跌", metric.changePercent)
+          : moneyMessage("盈亏", value),
       securityCode: code,
       value,
       thresholdTransform: negate ? (item) => -item : undefined,
@@ -502,10 +601,12 @@ function percentMessage(label: string, value: number | null): string {
 }
 
 function formatMoney(value: number | null): string {
-  return value == null ? "--" : new Intl.NumberFormat("zh-CN", {
-    maximumFractionDigits: 0,
-    signDisplay: "exceptZero"
-  }).format(value);
+  return value == null
+    ? "--"
+    : new Intl.NumberFormat("zh-CN", {
+        maximumFractionDigits: 0,
+        signDisplay: "exceptZero"
+      }).format(value);
 }
 
 function formatNumber(value: number | null): string {

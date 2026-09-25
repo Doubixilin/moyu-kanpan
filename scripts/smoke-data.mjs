@@ -17,13 +17,17 @@ const coordinated = await new QuoteCoordinator(undefined, {
 const marketCoordinator = new MarketDataCoordinator();
 const [marketOverview, marketDetail] = await Promise.all([
   marketCoordinator.fetchOverview("eastmoney", { marketOpen: false }),
-  marketCoordinator.fetchDetail({
-    key: instrumentKey("stock", "SH", "600519"),
-    kind: "stock",
-    code: "600519",
-    market: "SH",
-    name: "贵州茅台"
-  }, "eastmoney", { marketOpen: false })
+  marketCoordinator.fetchDetail(
+    {
+      key: instrumentKey("stock", "SH", "600519"),
+      kind: "stock",
+      code: "600519",
+      market: "SH",
+      name: "贵州茅台"
+    },
+    "eastmoney",
+    { marketOpen: false }
+  )
 ]);
 
 function compactQuotes(quotes) {

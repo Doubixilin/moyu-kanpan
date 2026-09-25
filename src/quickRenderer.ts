@@ -1,4 +1,5 @@
 import type { AppSnapshot, Quote } from "./domain/types.js";
+import { escapeHtml } from "./presentation/format.js";
 
 const root = document.querySelector<HTMLDivElement>("#quick-root");
 if (!root) throw new Error("Missing quick root");
@@ -21,12 +22,20 @@ const time = required("#quick-time");
 
 function update(snapshot: AppSnapshot): void {
   time.textContent = formatTime(snapshot.updatedAt);
-  indices.innerHTML = snapshot.market.indices.slice(0, 3).map((item) => `
+  indices.innerHTML =
+    snapshot.market.indices
+      .slice(0, 3)
+      .map(
+        (item) => `
     <div class="index ${direction(item.changePercent)}"><small>${escapeHtml(item.instrument.name)}</small><strong>${formatNumber(item.price)}</strong><span>${formatPercent(item.changePercent)}</span></div>
-  `).join("") || '<div class="empty">指数等待更新</div>';
+  `
+      )
+      .join("") || '<div class="empty">指数等待更新</div>';
 
   const quoteMap = new Map(snapshot.quotes.map((quote) => [quote.code, quote]));
-  const securityMap = new Map(snapshot.settings.securities.map((security) => [security.code, security]));
+  const securityMap = new Map(
+    snapshot.settings.securities.map((security) => [security.code, security])
+  );
   const rows = snapshot.settings.watchlist
     .filter((item) => item.visible)
     .sort((a, b) => a.order - b.order)
@@ -39,12 +48,14 @@ function update(snapshot: AppSnapshot): void {
     });
   quotes.innerHTML = rows.join("") || '<div class="empty">暂无重点项目</div>';
 
-  const important = snapshot.news.find((item) => item.analysis?.priority === "high") ?? snapshot.news[0];
+  const important =
+    snapshot.news.find((item) => item.analysis?.priority === "high") ?? snapshot.news[0];
   eventText.textContent = important?.title ?? "暂无重要动态";
   const feed = snapshot.feeds.quotes;
-  status.textContent = feed.degraded || feed.stale
-    ? "行情待核验"
-    : `${feed.source ?? "行情"} · ${formatTime(feed.lastSuccessAt)}`;
+  status.textContent =
+    feed.degraded || feed.stale
+      ? "行情待核验"
+      : `${feed.source ?? "行情"} · ${formatTime(feed.lastSuccessAt)}`;
   document.documentElement.dataset.state = feed.degraded || feed.stale ? "degraded" : "ready";
 }
 
@@ -79,13 +90,9 @@ function formatPercent(value: number | null): string {
 function formatTime(value: string | null): string {
   if (!value) return "--:--";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "--:--" : date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  })[character]!);
+  return Number.isNaN(date.getTime())
+    ? "--:--"
+    : date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
 void window.floatingStock?.getSnapshot().then(update);

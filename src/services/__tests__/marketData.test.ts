@@ -60,14 +60,19 @@ function daily(name = "上证指数") {
 
 function sector(): MarketSector {
   return {
-    code: "BK1", name: "半导体", price: 100,
-    changePercent: 2, amount: 1, source: "eastmoney"
+    code: "BK1",
+    name: "半导体",
+    price: 100,
+    changePercent: 2,
+    amount: 1,
+    source: "eastmoney"
   };
 }
 
 function providers(): MarketProviderSet {
   return {
-    eastmoneyIndices: async (instruments) => instruments.map((item) => indexQuote(item, "eastmoney")),
+    eastmoneyIndices: async (instruments) =>
+      instruments.map((item) => indexQuote(item, "eastmoney")),
     tencentIndices: async (instruments) => instruments.map((item) => indexQuote(item, "tencent")),
     eastmoneySectors: async () => [sector()],
     eastmoneyIntraday: async () => intraday(),
@@ -92,6 +97,76 @@ class MemoryCache implements MarketCacheStore {
 }
 
 describe("market data coordinator", () => {
+  it("caps the cached details and keeps the most recently written instruments", async () => {
+    const cache = new MemoryCache();
+    const coordinator = new MarketDataCoordinator(providers(), cache, { detailsLimit: 2 });
+    const instruments = DEFAULT_MARKET_INDICES;
+
+    for (const [index, instrument] of instruments.entries()) {
+      // 每次推进 60s，确保都越过分时 TTL、是真实抓取，并按时间可确定淘汰顺序。
+      await coordinator.fetchDetail(instrument, "eastmoney", {
+        marketOpen: true,
+        nowMs: nowMs + index * 60_000
+      });
+    }
+
+    const details = cache.value?.details ?? {};
+    assert.equal(Object.keys(details).length, 2);
+    assert.equal(details[instruments[0]!.key], undefined);
+    assert.notEqual(details[instruments[2]!.key], undefined);
+  });
+
+  it("does not rewrite the cache file when both series came from cache", async () => {
+    const cache = new MemoryCache();
+    const coordinator = new MarketDataCoordinator(providers(), cache);
+    const instrument = DEFAULT_MARKET_INDICES[0]!;
+
+    await coordinator.fetchDetail(instrument, "eastmoney", { marketOpen: true, nowMs });
+    const writesAfterFetch = cache.writes;
+    assert.equal(writesAfterFetch, 1);
+
+    // 分时 TTL 25s、日 K TTL 5min：5 秒后两者都命中缓存，不应再全量重写。
+    await coordinator.fetchDetail(instrument, "eastmoney", {
+      marketOpen: true,
+      nowMs: nowMs + 5_000
+    });
+    assert.equal(cache.writes, writesAfterFetch);
+  });
+
+  it("merges concurrent detail requests for the same instrument into one fan-out", async () => {
+    const set = providers();
+    let intradayCalls = 0;
+    let dailyCalls = 0;
+    set.eastmoneyIntraday = async () => {
+      intradayCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return intraday();
+    };
+    set.eastmoneyDaily = async () => {
+      dailyCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return daily();
+    };
+    const coordinator = new MarketDataCoordinator(set);
+    const instrument = DEFAULT_MARKET_INDICES[0]!;
+    const context = { marketOpen: true, nowMs };
+
+    const [first, second] = await Promise.all([
+      coordinator.fetchDetail(instrument, "eastmoney", context),
+      coordinator.fetchDetail(instrument, "eastmoney", context)
+    ]);
+
+    assert.equal(intradayCalls, 1);
+    assert.equal(dailyCalls, 1);
+    assert.equal(first.instrument.key, second.instrument.key);
+    // settle 之后条目要清除，后续请求不应被永久复用。
+    await coordinator.fetchDetail(instrument, "eastmoney", {
+      marketOpen: true,
+      nowMs: nowMs + 60_000
+    });
+    assert.equal(intradayCalls, 2);
+  });
+
   it("reuses a recent fast-index result in the heavier overview", async () => {
     const set = providers();
     let indexCalls = 0;
@@ -123,8 +198,14 @@ describe("market data coordinator", () => {
       nowMs
     });
 
-    assert.deepEqual(fallbackRequest, DEFAULT_MARKET_INDICES.slice(1).map((item) => item.key));
-    assert.deepEqual(result.indices.map((item) => item.instrument.key), DEFAULT_MARKET_INDICES.map((item) => item.key));
+    assert.deepEqual(
+      fallbackRequest,
+      DEFAULT_MARKET_INDICES.slice(1).map((item) => item.key)
+    );
+    assert.deepEqual(
+      result.indices.map((item) => item.instrument.key),
+      DEFAULT_MARKET_INDICES.map((item) => item.key)
+    );
     assert.equal(result.source, "mixed");
     assert.equal(result.degraded, true);
   });
@@ -136,9 +217,15 @@ describe("market data coordinator", () => {
     const trusted = await coordinator.fetchOverview("eastmoney", { marketOpen: false, nowMs });
     assert.equal(trusted.indices.length, 3);
 
-    set.eastmoneyIndices = async () => { throw new Error("east down"); };
-    set.tencentIndices = async () => { throw new Error("tencent down"); };
-    set.eastmoneySectors = async () => { throw new Error("sector down"); };
+    set.eastmoneyIndices = async () => {
+      throw new Error("east down");
+    };
+    set.tencentIndices = async () => {
+      throw new Error("tencent down");
+    };
+    set.eastmoneySectors = async () => {
+      throw new Error("sector down");
+    };
     const retained = await coordinator.fetchOverview("eastmoney", {
       marketOpen: false,
       nowMs: nowMs + 60_000
@@ -153,7 +240,9 @@ describe("market data coordinator", () => {
   it("falls back intraday independently while keeping daily data on the primary", async () => {
     const set = providers();
     let tencentDailyCalls = 0;
-    set.eastmoneyIntraday = async () => { throw new Error("intraday down"); };
+    set.eastmoneyIntraday = async () => {
+      throw new Error("intraday down");
+    };
     set.tencentDaily = async () => {
       tencentDailyCalls += 1;
       return daily();
@@ -182,10 +271,18 @@ describe("market data coordinator", () => {
     const instrument = DEFAULT_MARKET_INDICES[0]!;
     await coordinator.fetchDetail(instrument, "eastmoney", { marketOpen: false, nowMs });
 
-    set.eastmoneyIntraday = async () => { throw new Error("east down"); };
-    set.tencentIntraday = async () => { throw new Error("tencent down"); };
-    set.eastmoneyDaily = async () => { throw new Error("east down"); };
-    set.tencentDaily = async () => { throw new Error("tencent down"); };
+    set.eastmoneyIntraday = async () => {
+      throw new Error("east down");
+    };
+    set.tencentIntraday = async () => {
+      throw new Error("tencent down");
+    };
+    set.eastmoneyDaily = async () => {
+      throw new Error("east down");
+    };
+    set.tencentDaily = async () => {
+      throw new Error("tencent down");
+    };
     const retained = await coordinator.fetchDetail(instrument, "eastmoney", {
       marketOpen: false,
       nowMs: nowMs + 10_000
@@ -201,10 +298,14 @@ describe("market data coordinator", () => {
   it("ignores cache write failures without dropping live market data", async () => {
     const brokenCache: MarketCacheStore = {
       read: async () => null,
-      write: async () => { throw new Error("disk full"); }
+      write: async () => {
+        throw new Error("disk full");
+      }
     };
-    const result = await new MarketDataCoordinator(providers(), brokenCache)
-      .fetchOverview("eastmoney", { marketOpen: false, nowMs });
+    const result = await new MarketDataCoordinator(providers(), brokenCache).fetchOverview(
+      "eastmoney",
+      { marketOpen: false, nowMs }
+    );
     assert.equal(result.indices.length, 3);
   });
 });

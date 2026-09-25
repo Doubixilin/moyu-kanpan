@@ -22,16 +22,18 @@ export function quickWindowBounds(
     left: Math.abs(tray.x - workArea.x),
     right: Math.abs(workArea.x + workArea.width - (tray.x + tray.width))
   };
-  const edge = tray.y >= workArea.y + workArea.height
-    ? "bottom"
-    : tray.y + tray.height <= workArea.y
-      ? "top"
-      : tray.x >= workArea.x + workArea.width
-        ? "right"
-        : tray.x + tray.width <= workArea.x
-          ? "left"
-          : (Object.entries(distances) as Array<[keyof typeof distances, number]>)
-            .sort((a, b) => a[1] - b[1])[0]![0];
+  const edge =
+    tray.y >= workArea.y + workArea.height
+      ? "bottom"
+      : tray.y + tray.height <= workArea.y
+        ? "top"
+        : tray.x >= workArea.x + workArea.width
+          ? "right"
+          : tray.x + tray.width <= workArea.x
+            ? "left"
+            : (Object.entries(distances) as Array<[keyof typeof distances, number]>).sort(
+                (a, b) => a[1] - b[1]
+              )[0]![0];
   let x = tray.x + tray.width - size.width;
   let y = tray.y - size.height - margin;
   if (edge === "top") y = tray.y + tray.height + margin;

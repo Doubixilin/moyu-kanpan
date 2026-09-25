@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { DailyCandle } from "../types";
-import {
-  DEFAULT_MARKET_INDICES,
-  eastmoneySecid,
-  tencentSymbol,
-  withBoll
-} from "../market";
+import { DEFAULT_MARKET_INDICES, eastmoneySecid, tencentSymbol, withBoll } from "../market";
 
 function candle(day: number, close: number): DailyCandle {
   return {

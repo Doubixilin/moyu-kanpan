@@ -210,9 +210,7 @@ h1 {
   min-width: 0;
 }
 
-.quote-name strong,
-.news-title,
-.news-summary {
+.quote-name strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -861,16 +859,6 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
-.news-title {
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.news-summary {
-  color: rgb(237 242 244 / 0.58);
-  font-size: 11px;
-}
-
 .empty-state {
   height: 100%;
   min-height: 120px;
@@ -908,8 +896,7 @@ h1 {
 :root[data-theme="stealth"] .quote-metric small,
 :root[data-theme="stealth"] .holding-metrics small,
 :root[data-theme="stealth"] .portfolio-summary small,
-:root[data-theme="stealth"] .news-time,
-:root[data-theme="stealth"] .news-summary {
+:root[data-theme="stealth"] .news-time {
   color: rgb(220 221 222 / 0.46);
 }
 
@@ -1168,15 +1155,4 @@ h1 {
 
 :root[data-theme="stealth"] .driver-fallback {
   color: rgb(220 221 222 / 0.58);
-}
-.driver-inference {
-  overflow: hidden;
-  color: rgb(255 209 102 / 0.72);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-:root[data-theme="stealth"] .driver-inference {
-  color: rgb(220 221 222 / 0.52);
 }

@@ -20,25 +20,27 @@ function settings() {
       stopWarningPercent: 5,
       groups: [{ id: "tech", name: "科技组", profitThreshold: 150, lossThreshold: 100 }]
     },
-    holdings: [{
-      securityCode: "600519",
-      quantity: 100,
-      costPrice: 10,
-      groupId: "tech",
-      alertRules: {
-        enabled: true,
-        stopLossPrice: 9,
-        watchPrice: 13,
-        priceAbove: 12.5,
-        priceBelow: 9.5,
-        risePercent: 5,
-        fallPercent: 4,
-        dailyProfitAmount: 80,
-        dailyLossAmount: 50,
-        totalProfitAmount: 150,
-        totalLossAmount: 100
+    holdings: [
+      {
+        securityCode: "600519",
+        quantity: 100,
+        costPrice: 10,
+        groupId: "tech",
+        alertRules: {
+          enabled: true,
+          stopLossPrice: 9,
+          watchPrice: 13,
+          priceAbove: 12.5,
+          priceBelow: 9.5,
+          risePercent: 5,
+          fallPercent: 4,
+          dailyProfitAmount: 80,
+          dailyLossAmount: 50,
+          totalProfitAmount: 150,
+          totalLossAmount: 100
+        }
       }
-    }]
+    ]
   });
 }
 
@@ -93,14 +95,16 @@ describe("deterministic risk calculations", () => {
   it("marks retained or conflicted quotes unsafe and suppresses threshold violations", () => {
     const result = calculateRiskSnapshot({
       settings: settings(),
-      quotes: [quote({
-        source: "local",
-        quality: {
-          state: "retained",
-          receivedAt: "2026-07-10T02:00:00.000Z",
-          reasons: ["provider_down"]
-        }
-      })],
+      quotes: [
+        quote({
+          source: "local",
+          quality: {
+            state: "retained",
+            receivedAt: "2026-07-10T02:00:00.000Z",
+            reasons: ["provider_down"]
+          }
+        })
+      ],
       feedHealthy: true
     });
 
@@ -136,6 +140,9 @@ describe("deterministic risk calculations", () => {
     const candidates = buildAlertCandidates(currentSettings, snapshot);
 
     assert.ok(candidates.some((item) => item.ruleId === "holding:600519:position"));
-    assert.equal(candidates.some((item) => item.ruleId === "holding:600519:stop-loss"), false);
+    assert.equal(
+      candidates.some((item) => item.ruleId === "holding:600519:stop-loss"),
+      false
+    );
   });
 });

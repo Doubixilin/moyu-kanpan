@@ -21,26 +21,33 @@ const codes = activeSecurityCodes(config);
 const result = await fetchQuotesWithFallback(codes, config.providers.quote);
 const received = new Set(result.quotes.map((quote) => quote.code));
 const missing = codes.filter((code) => !received.has(code));
-const missingSourceTimes = result.quotes.filter((quote) => !quote.updatedAt).map((quote) => quote.code);
+const missingSourceTimes = result.quotes
+  .filter((quote) => !quote.updatedAt)
+  .map((quote) => quote.code);
 
-console.log(JSON.stringify({
-  requested: codes.length,
-  received: result.quotes.length,
-  source: result.source,
-  missing,
-  missingSourceTimes,
-  sample: result.quotes.slice(0, 5).map((quote) => ({
-    code: quote.code,
-    name: quote.name,
-    price: quote.price,
-    updatedAt: quote.updatedAt
-  }))
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      requested: codes.length,
+      received: result.quotes.length,
+      source: result.source,
+      missing,
+      missingSourceTimes,
+      sample: result.quotes.slice(0, 5).map((quote) => ({
+        code: quote.code,
+        name: quote.name,
+        price: quote.price,
+        updatedAt: quote.updatedAt
+      }))
+    },
+    null,
+    2
+  )
+);
 
 if (missingSourceTimes.length > 0) {
   throw new Error("Missing quote source times: " + missingSourceTimes.join(", "));
 }
-
 
 if (missing.length > 0) {
   throw new Error("Missing configured quotes: " + missing.join(", "));

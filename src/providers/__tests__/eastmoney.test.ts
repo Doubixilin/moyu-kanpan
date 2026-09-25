@@ -10,6 +10,15 @@ describe("eastmoney provider", () => {
     assert.equal(buildEastmoneySecid("300750"), "0.300750");
   });
 
+  it("routes BSE codes to the 0. prefix and keeps Shanghai B-shares on 1.", () => {
+    // 实测：0.920099 返回数据，1.920099 无数据。
+    assert.equal(buildEastmoneySecid("920099"), "0.920099");
+    assert.equal(buildEastmoneySecid("832000"), "0.832000");
+    assert.equal(buildEastmoneySecid("430047"), "0.430047");
+    // 900xxx 是沪市 B 股，不能被 "9 开头" 规则误判为北交所。
+    assert.equal(buildEastmoneySecid("900001"), "1.900001");
+  });
+
   it("parses quote list payload into normalized quotes", () => {
     const payload = {
       rc: 0,

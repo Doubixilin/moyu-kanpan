@@ -8,7 +8,8 @@ import { EncryptedApiKeyStore, type SecretEncryption } from "../credentials";
 function encryption(available = true): SecretEncryption {
   return {
     isAvailable: () => available,
-    encryptString: (value) => Buffer.from([...Buffer.from(value, "utf8")].map((byte) => byte ^ 0xa5)),
+    encryptString: (value) =>
+      Buffer.from([...Buffer.from(value, "utf8")].map((byte) => byte ^ 0xa5)),
     decryptString: (value) => Buffer.from([...value].map((byte) => byte ^ 0xa5)).toString("utf8")
   };
 }

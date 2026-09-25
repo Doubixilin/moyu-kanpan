@@ -61,7 +61,7 @@ export function quoteFingerprint(quotes: Quote[]): string {
 
 export function newestQuoteTimestamp(quotes: Quote[]): string | null {
   const timestamps = quotes
-    .map((quote) => quote.updatedAt ? Date.parse(quote.updatedAt) : Number.NaN)
+    .map((quote) => (quote.updatedAt ? Date.parse(quote.updatedAt) : Number.NaN))
     .filter(Number.isFinite);
   return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
 }
@@ -75,7 +75,7 @@ export function isQuoteFeedStalled(input: {
 }): boolean {
   if (!input.marketOpen) return false;
   const activityTimes = [input.dataUpdatedAt, input.lastChangedAt]
-    .map((value) => value ? Date.parse(value) : Number.NaN)
+    .map((value) => (value ? Date.parse(value) : Number.NaN))
     .filter(Number.isFinite);
   if (activityTimes.length === 0) return true;
   return input.nowMs - Math.max(...activityTimes) > input.thresholdMs;
@@ -92,9 +92,9 @@ export function summarizeNewsSourceHealth(
     csrc: "证监会"
   };
   const failing = states
-    .filter((state): state is NewsSourceState => Boolean(
-      state && state.consecutiveFailures >= failureThreshold
-    ))
+    .filter((state): state is NewsSourceState =>
+      Boolean(state && state.consecutiveFailures >= failureThreshold)
+    )
     .map((state) => labels[state.source] ?? state.source);
   if (!failing.length) return null;
   return `${failing.join("、")}连续失败，正在使用其他来源和历史事件`;

@@ -40,11 +40,10 @@ describe("quote quality gate", () => {
   });
 
   it("rejects internally inconsistent price fields", () => {
-    const result = validateQuote(
-      { ...baseQuote, high: 90, changePercent: 20 },
-      "600519",
-      { marketOpen: false, nowMs: now }
-    );
+    const result = validateQuote({ ...baseQuote, high: 90, changePercent: 20 }, "600519", {
+      marketOpen: false,
+      nowMs: now
+    });
     assert.equal(result.usable, false);
     assert.ok(result.issues.includes("price_outside_range"));
     assert.ok(result.issues.includes("change_percent_mismatch"));

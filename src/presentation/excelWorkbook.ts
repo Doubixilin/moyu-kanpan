@@ -13,11 +13,17 @@ export function buildExcelWorkbook(snapshot: AppSnapshot): ExcelSheetData[] {
     .slice(0, 10)
     .map((item) => item.securityCode);
   const quoteMap = new Map(snapshot.quotes.map((quote) => [quote.code, quote]));
-  const securityMap = new Map(snapshot.settings.securities.map((security) => [security.code, security]));
+  const securityMap = new Map(
+    snapshot.settings.securities.map((security) => [security.code, security])
+  );
   const visibleQuotes = visibleCodes.map((code) => ({
     code,
     quote: quoteMap.get(code),
-    name: securityMap.get(code)?.alias || securityMap.get(code)?.name || quoteMap.get(code)?.name || code
+    name:
+      securityMap.get(code)?.alias ||
+      securityMap.get(code)?.name ||
+      quoteMap.get(code)?.name ||
+      code
   }));
   const overview = baseOverviewCells();
   const tracking = baseTrackingCells();
@@ -92,24 +98,45 @@ export function buildExcelWorkbook(snapshot: AppSnapshot): ExcelSheetData[] {
 function baseOverviewCells(): Record<string, string | number> {
   return {
     A1: "2026年项目数据实时汇总",
-    A3: "序号", B3: "项目名称", C3: "项目代码", D3: "当前值", E3: "日变化",
-    F3: "累计量", G3: "当前状态", H3: "更新时间", I3: "数据源", J3: "最新动态"
+    A3: "序号",
+    B3: "项目名称",
+    C3: "项目代码",
+    D3: "当前值",
+    E3: "日变化",
+    F3: "累计量",
+    G3: "当前状态",
+    H3: "更新时间",
+    I3: "数据源",
+    J3: "最新动态"
   };
 }
 
 function baseTrackingCells(): Record<string, string | number> {
   return {
     A1: "项目实时进度跟踪表",
-    A3: "时间", B3: "项目", C3: "当前值", D3: "起始值", E3: "最高值",
-    F3: "最低值", G3: "变化", H3: "状态", I3: "来源", J3: "累计量"
+    A3: "时间",
+    B3: "项目",
+    C3: "当前值",
+    D3: "起始值",
+    E3: "最高值",
+    F3: "最低值",
+    G3: "变化",
+    H3: "状态",
+    I3: "来源",
+    J3: "累计量"
   };
 }
 
 function baseActivityCells(): Record<string, string | number> {
   return {
     A1: "工作动态与事项记录",
-    A3: "时间", B3: "类别", C3: "关联项目", D3: "事项摘要", E3: "优先级",
-    F3: "材料状态", G3: "记录来源"
+    A3: "时间",
+    B3: "类别",
+    C3: "关联项目",
+    D3: "事项摘要",
+    E3: "优先级",
+    F3: "材料状态",
+    G3: "记录来源"
   };
 }
 

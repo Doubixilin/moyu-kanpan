@@ -37,9 +37,37 @@ const NAMED_KEYS: Record<string, string> = {
 };
 
 const PUNCTUATION_KEYS = new Set([
-  ")", "!", "@", "#", "$", "%", "^", "&", "*", "(", ":", ";", "+", "=",
-  "<", ",", "_", "-", ">", ".", "?", "/", "~", "`", "{", "]", "[", "|",
-  "\\", "}", "\""
+  ")",
+  "!",
+  "@",
+  "#",
+  "$",
+  "%",
+  "^",
+  "&",
+  "*",
+  "(",
+  ":",
+  ";",
+  "+",
+  "=",
+  "<",
+  ",",
+  "_",
+  "-",
+  ">",
+  ".",
+  "?",
+  "/",
+  "~",
+  "`",
+  "{",
+  "]",
+  "[",
+  "|",
+  "\\",
+  "}",
+  '"'
 ]);
 
 const FORBIDDEN_ACCELERATORS = new Set([
@@ -56,7 +84,10 @@ export function normalizeBossKeyAccelerator(value: unknown): string {
 
 export function parseBossKeyAccelerator(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const tokens = value.split("+").map((token) => token.trim()).filter(Boolean);
+  const tokens = value
+    .split("+")
+    .map((token) => token.trim())
+    .filter(Boolean);
   if (tokens.length === 0) return null;
 
   const modifiers = new Set<string>();
@@ -82,8 +113,9 @@ export function parseBossKeyAccelerator(value: unknown): string | null {
   if (!key || key === "F11") return null;
   if (modifiers.size === 0 && !canUseWithoutModifier(key)) return null;
 
-  const ordered = ["CommandOrControl", "Alt", "Shift", "Super"]
-    .filter((modifier) => modifiers.has(modifier));
+  const ordered = ["CommandOrControl", "Alt", "Shift", "Super"].filter((modifier) =>
+    modifiers.has(modifier)
+  );
   const accelerator = [...ordered, key].join("+");
   return FORBIDDEN_ACCELERATORS.has(accelerator) ? null : accelerator;
 }
@@ -98,8 +130,10 @@ function normalizeKey(token: string): string {
 }
 
 function canUseWithoutModifier(key: string): boolean {
-  return (/^F(?:[1-9]|1\d|2[0-4])$/.test(key) && key !== "F11") ||
+  return (
+    (/^F(?:[1-9]|1\d|2[0-4])$/.test(key) && key !== "F11") ||
     key.startsWith("Media") ||
     key.startsWith("Volume") ||
-    key === "PrintScreen";
+    key === "PrintScreen"
+  );
 }

@@ -15,6 +15,13 @@
     "dev:electron": "npm run dev",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/__tests__/*.test.ts\"",
     "test:watch": "node --import tsx --watch --test \"src/**/*.test.ts\" \"src/**/__tests__/*.test.ts\"",
+    "test:coverage": "c8 npm test",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.electron.json --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build",
     "build": "node scripts/clean.mjs && tsc -p tsconfig.json && node scripts/build-renderer.mjs && tsc -p tsconfig.electron.json && node scripts/verify-electron-build.mjs",
     "smoke:data": "npm run build && node scripts/smoke-data.mjs",
     "smoke:news": "npm run build && node scripts/smoke-news-events.mjs",
@@ -29,11 +36,17 @@
     "iconv-lite": "^0.7.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^25.0.2",
+    "c8": "^12.0.0",
     "electron": "^39.2.7",
     "electron-builder": "^26.0.12",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.9",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1"
   },
   "build": {
     "appId": "dev.polaris.floatingStockWidget",
@@ -44,6 +57,7 @@
       "config/**",
       "!config/personal.local.json",
       "resources/icons/**",
+      "!resources/icons/app.png",
       "LICENSE",
       "README.md",
       "package.json"

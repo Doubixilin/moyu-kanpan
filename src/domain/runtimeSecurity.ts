@@ -1,7 +1,4 @@
-export function resolveDevServerUrl(
-  isPackaged: boolean,
-  value: string | undefined
-): string | null {
+export function resolveDevServerUrl(isPackaged: boolean, value: string | undefined): string | null {
   if (isPackaged || !value?.trim()) return null;
   try {
     const url = new URL(value.trim());
@@ -29,9 +26,13 @@ export function isTrustedRendererUrl(
     }
     if (!devServerUrl) return false;
     const dev = new URL(devServerUrl);
-    return url.origin === dev.origin &&
-      (url.pathname === dev.pathname || url.pathname === "/" ||
-        url.pathname.endsWith("/index.html") || url.pathname.endsWith("/settings.html"));
+    return (
+      url.origin === dev.origin &&
+      (url.pathname === dev.pathname ||
+        url.pathname === "/" ||
+        url.pathname.endsWith("/index.html") ||
+        url.pathname.endsWith("/settings.html"))
+    );
   } catch {
     return false;
   }
@@ -46,8 +47,7 @@ export function isSecureApiBaseUrl(value: string): boolean {
   try {
     const url = new URL(value);
     if (url.username || url.password) return false;
-    return url.protocol === "https:" ||
-      (url.protocol === "http:" && isLoopbackHost(url.hostname));
+    return url.protocol === "https:" || (url.protocol === "http:" && isLoopbackHost(url.hostname));
   } catch {
     return false;
   }

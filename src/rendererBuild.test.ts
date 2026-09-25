@@ -14,10 +14,7 @@ describe("settings renderer build contract", () => {
     );
 
     assert.match(entry, /from "\.\/shortcut\.js"/);
-    assert.match(
-      builder,
-      /compileTypeScript\("src\/shortcut\.ts",\s*"shortcut\.js"\)/
-    );
+    assert.match(builder, /compileTypeScript\("src\/shortcut\.ts",\s*"shortcut\.js"\)/);
     assert.match(verifier, /verifyRendererImports/);
     for (const label of ["窗口与页面", "持仓与提醒", "自选与行情", "新闻与 AI", "导入与备份"]) {
       assert.match(entry, new RegExp(label));

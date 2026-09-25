@@ -36,8 +36,13 @@ export function ensureVisibleWindowBounds(
       width,
       height
     };
-    if (workAreas.some((area) => visibleWidth(candidate, area) >= MIN_VISIBLE_WIDTH &&
-      visibleHeight(candidate, area) >= MIN_VISIBLE_HEIGHT)) {
+    if (
+      workAreas.some(
+        (area) =>
+          visibleWidth(candidate, area) >= MIN_VISIBLE_WIDTH &&
+          visibleHeight(candidate, area) >= MIN_VISIBLE_HEIGHT
+      )
+    ) {
       return candidate;
     }
   }

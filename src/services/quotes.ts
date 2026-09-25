@@ -97,14 +97,20 @@ export class QuoteCoordinator {
   private readonly lastTrusted = new Map<string, Quote>();
   private readonly runtime: Record<QuoteProviderName, ProviderRuntime> = {
     eastmoney: {
-      samples: [], consecutiveFailures: 0, openUntilCycle: 0,
+      samples: [],
+      consecutiveFailures: 0,
+      openUntilCycle: 0,
       openUntilMs: 0,
-      conflictObservations: 0, conflicts: 0
+      conflictObservations: 0,
+      conflicts: 0
     },
     tencent: {
-      samples: [], consecutiveFailures: 0, openUntilCycle: 0,
+      samples: [],
+      consecutiveFailures: 0,
+      openUntilCycle: 0,
       openUntilMs: 0,
-      conflictObservations: 0, conflicts: 0
+      conflictObservations: 0,
+      conflicts: 0
     }
   };
 
@@ -137,17 +143,16 @@ export class QuoteCoordinator {
     const secondarySource = otherSource(primarySource);
     const primary = await this.attempt(primarySource, requestedCodes, context);
 
-    const unresolved = requestedCodes.filter(
-      (code) => !primary.validations.get(code)?.trusted
-    );
+    const unresolved = requestedCodes.filter((code) => !primary.validations.get(code)?.trusted);
     const crossCheck = this.shouldCrossCheck(nowMs);
     const recoveryProbe = primarySource !== preferred && this.shouldProbeRecovery(nowMs);
     if (crossCheck) this.lastCrossCheckAt = nowMs;
     if (recoveryProbe) this.lastRecoveryProbeAt = nowMs;
     const secondaryCodes = crossCheck || recoveryProbe ? requestedCodes : unresolved;
-    const secondary = secondaryCodes.length > 0
-      ? await this.attempt(secondarySource, secondaryCodes, context)
-      : emptyAttempt(secondarySource);
+    const secondary =
+      secondaryCodes.length > 0
+        ? await this.attempt(secondarySource, secondaryCodes, context)
+        : emptyAttempt(secondarySource);
 
     const receivedAt = new Date(context.nowMs ?? Date.now()).toISOString();
     const quotes: Quote[] = [];
@@ -165,10 +170,8 @@ export class QuoteCoordinator {
       let state: QuoteQualityState | null = null;
       let reasons: string[] = [];
       const bothTrusted = Boolean(primaryValidation?.trusted && secondaryValidation?.trusted);
-      const providerConflict = bothTrusted && quotesConflict(
-        primaryValidation!.quote,
-        secondaryValidation!.quote
-      );
+      const providerConflict =
+        bothTrusted && quotesConflict(primaryValidation!.quote, secondaryValidation!.quote);
       if (bothTrusted) {
         this.observeConflict(primary.source, providerConflict);
         this.observeConflict(secondary.source, providerConflict);
@@ -179,9 +182,7 @@ export class QuoteCoordinator {
         state = "conflict";
         reasons = ["provider_price_conflict"];
         const retained = this.lastTrusted.get(code);
-        selected = retained
-          ? { ...retained, source: "local" }
-          : { ...primaryValidation!.quote };
+        selected = retained ? { ...retained, source: "local" } : { ...primaryValidation!.quote };
       } else if (primaryValidation?.trusted) {
         selected = { ...primaryValidation.quote };
         state = primaryValidation.quote.source === preferred ? "fresh" : "fallback";
@@ -223,9 +224,10 @@ export class QuoteCoordinator {
         staleCount += 1;
       }
 
-      const originalSource = selected.source === "eastmoney" || selected.source === "tencent"
-        ? selected.source
-        : this.lastTrusted.get(code)?.source;
+      const originalSource =
+        selected.source === "eastmoney" || selected.source === "tencent"
+          ? selected.source
+          : this.lastTrusted.get(code)?.source;
       selected.quality = {
         state,
         receivedAt,
@@ -237,20 +239,20 @@ export class QuoteCoordinator {
       quotes.push(selected);
     }
 
-    this.updateActiveSource(
-      preferred,
-      primary,
-      secondary,
-      requestedCodes.length,
-      conflictCount
-    );
+    this.updateActiveSource(preferred, primary, secondary, requestedCodes.length, conflictCount);
 
     const failures = attemptFailures([primary, secondary]);
     const coverage = requestedCodes.length > 0 ? quotes.length / requestedCodes.length : 1;
     const source = aggregateSource(quotes);
-    const degraded = fallbackCount > 0 || retainedCount > 0 || staleCount > 0 ||
-      conflictCount > 0 || missingCodes.length > 0 || failures.length > 0;
-    const alertSafe = requestedCodes.length > 0 &&
+    const degraded =
+      fallbackCount > 0 ||
+      retainedCount > 0 ||
+      staleCount > 0 ||
+      conflictCount > 0 ||
+      missingCodes.length > 0 ||
+      failures.length > 0;
+    const alertSafe =
+      requestedCodes.length > 0 &&
       liveCount === requestedCodes.length &&
       conflictCount === 0 &&
       staleCount === 0 &&
@@ -387,9 +389,11 @@ export class QuoteCoordinator {
     const primaryTrusted = trustedCount(primary);
     const secondaryTrusted = trustedCount(secondary);
     if (primary.source === preferred) {
-      if (requestedCount > 0 &&
-          (primary.failure != null || primaryTrusted / requestedCount < 0.5) &&
-          secondaryTrusted > 0) {
+      if (
+        requestedCount > 0 &&
+        (primary.failure != null || primaryTrusted / requestedCount < 0.5) &&
+        secondaryTrusted > 0
+      ) {
         this.activeSource = secondary.source;
         this.activeSinceCycle = this.cycle;
         this.activeSinceMs = this.currentNowMs;
@@ -417,16 +421,17 @@ export class QuoteCoordinator {
     return (["eastmoney", "tencent"] as const).map((provider) => {
       const runtime = this.runtime[provider];
       const samples = runtime.samples;
-      const successRate = average(samples.map((sample) => sample.success ? 1 : 0));
+      const successRate = average(samples.map((sample) => (sample.success ? 1 : 0)));
       const completenessRate = average(samples.map((sample) => sample.completeness));
       const freshnessRate = average(samples.map((sample) => sample.freshness));
       const parseFailureRate = average(samples.map((sample) => sample.parseFailure));
       const latencies = samples.map((sample) => sample.latencyMs).sort((a, b) => a - b);
-      const circuitState = runtime.openUntilCycle > this.cycle || runtime.openUntilMs > this.currentNowMs
-        ? "open"
-        : runtime.consecutiveFailures >= (this.options.circuitFailureThreshold ?? 3)
-          ? "half-open"
-          : "closed";
+      const circuitState =
+        runtime.openUntilCycle > this.cycle || runtime.openUntilMs > this.currentNowMs
+          ? "open"
+          : runtime.consecutiveFailures >= (this.options.circuitFailureThreshold ?? 3)
+            ? "half-open"
+            : "closed";
       return {
         provider,
         successRate,
@@ -435,9 +440,8 @@ export class QuoteCoordinator {
         latencyP95Ms: percentile(latencies, 0.95),
         freshnessRate,
         parseFailureRate,
-        conflictRate: runtime.conflictObservations > 0
-          ? runtime.conflicts / runtime.conflictObservations
-          : 0,
+        conflictRate:
+          runtime.conflictObservations > 0 ? runtime.conflicts / runtime.conflictObservations : 0,
         consecutiveFailures: runtime.consecutiveFailures,
         circuitState
       };
@@ -453,30 +457,36 @@ export class QuoteCoordinator {
   }
 
   private shouldProbeRecovery(nowMs: number): boolean {
-    if (this.options.recoveryProbeEvery !== undefined ||
-        this.options.stickyCycles !== undefined) {
+    if (this.options.recoveryProbeEvery !== undefined || this.options.stickyCycles !== undefined) {
       const every = this.options.recoveryProbeEvery ?? 3;
       const sticky = this.options.stickyCycles ?? 3;
-      return this.cycle - this.activeSinceCycle >= sticky &&
-        every > 0 && this.cycle % every === 0;
+      return this.cycle - this.activeSinceCycle >= sticky && every > 0 && this.cycle % every === 0;
     }
     const intervalMs = this.options.recoveryProbeIntervalMs ?? 20_000;
     const stickyMs = this.options.stickyMs ?? 10_000;
-    return nowMs - this.activeSinceMs >= stickyMs &&
-      intervalMs > 0 && nowMs - this.lastRecoveryProbeAt >= intervalMs;
+    return (
+      nowMs - this.activeSinceMs >= stickyMs &&
+      intervalMs > 0 &&
+      nowMs - this.lastRecoveryProbeAt >= intervalMs
+    );
   }
 }
 
+/**
+ * 一次性拉取行情（含东财/腾讯主备回退）。
+ *
+ * 注意：内部每次调用都新建一个 coordinator，因此**不保留**熔断状态、恢复探测进度与
+ * `lastTrusted` 缓存，`crossCheckEvery: 0` 也意味着不做跨源交叉校验。
+ * 这适合 smoke 脚本与单元测试这类一次性探测；应用内请复用长期存活的 `QuoteCoordinator`。
+ */
 export async function fetchQuotesWithFallback(
   codes: string[],
   preferred: QuoteProviderName,
   providers: QuoteProviderSet = defaultProviders
 ): Promise<QuoteFetchResult> {
-  return new QuoteCoordinator(providers, { crossCheckEvery: 0 }).fetch(
-    codes,
-    preferred,
-    { marketOpen: false }
-  );
+  return new QuoteCoordinator(providers, { crossCheckEvery: 0 }).fetch(codes, preferred, {
+    marketOpen: false
+  });
 }
 
 function firstUsable(
@@ -510,9 +520,7 @@ function attemptFailures(attempts: ProviderAttempt[]): string[] {
     }
     const trusted = trustedCount(attempt);
     if (trusted < attempt.requestedCodes.length) {
-      failures.push(
-        attempt.source + ":trusted " + trusted + "/" + attempt.requestedCodes.length
-      );
+      failures.push(attempt.source + ":trusted " + trusted + "/" + attempt.requestedCodes.length);
     }
   }
   return failures;
@@ -522,9 +530,7 @@ function aggregateSource(quotes: Quote[]): DataSource {
   const liveSources = new Set(
     quotes
       .map((quote) => quote.source)
-      .filter((source): source is LiveQuoteSource =>
-        source === "eastmoney" || source === "tencent"
-      )
+      .filter((source): source is LiveQuoteSource => source === "eastmoney" || source === "tencent")
   );
   if (liveSources.size > 1) return "mixed";
   if (liveSources.size === 1) return [...liveSources][0]!;
@@ -541,9 +547,7 @@ function otherSource(source: QuoteProviderName): QuoteProviderName {
 }
 
 function average(values: number[]): number {
-  return values.length > 0
-    ? values.reduce((sum, value) => sum + value, 0) / values.length
-    : 0;
+  return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 }
 
 function percentile(sortedValues: number[], quantile: number): number | null {
@@ -553,8 +557,12 @@ function percentile(sortedValues: number[], quantile: number): number | null {
 }
 
 function isTimestampIssue(issue: string): boolean {
-  return issue === "source_stale" || issue === "missing_timestamp" ||
-    issue === "invalid_timestamp" || issue === "future_timestamp";
+  return (
+    issue === "source_stale" ||
+    issue === "missing_timestamp" ||
+    issue === "invalid_timestamp" ||
+    issue === "future_timestamp"
+  );
 }
 
 function errorMessage(error: unknown): string {

@@ -8,6 +8,7 @@ import {
   type ExcelCustomSheetState
 } from "./presentation/excelCustomSheet.js";
 import { buildExcelBollChart } from "./presentation/excelTrend.js";
+import { escapeHtml } from "./presentation/format.js";
 
 type RibbonTab = "home" | "insert" | "layout" | "formulas" | "data" | "review" | "view";
 
@@ -20,15 +21,70 @@ let sheets: ExcelSheetData[] = [
     name: "项目总览",
     cells: {
       A1: "2026年7月项目数据汇总",
-      A3: "序号", B3: "项目名称", C3: "项目代码", D3: "负责人", E3: "计划进度",
-      F3: "实际进度", G3: "本周变化", H3: "当前状态", I3: "更新时间", J3: "备注",
-      A4: 1, B4: "年度重点项目", C4: "XM-001", D4: "王宁", E4: "72%", F4: "74%", G4: "+2.0%", H4: "正常", I4: "10:32", J4: "按计划推进",
-      A5: 2, B5: "运营效率提升", C5: "XM-002", D5: "李然", E5: "58%", F5: "55%", G5: "-1.2%", H5: "关注", I5: "10:32", J5: "等待外部确认",
-      A6: 3, B6: "供应链优化", C6: "XM-003", D6: "陈嘉", E6: "66%", F6: "69%", G6: "+3.4%", H6: "正常", I6: "10:32", J6: "阶段目标完成",
-      A7: 4, B7: "客户服务改造", C7: "XM-004", D7: "赵屿", E7: "81%", F7: "80%", G7: "+0.6%", H7: "正常", I7: "10:32", J7: "本周验收",
-      A10: "本周摘要", A11: "完成事项", B11: 12, A12: "进行中", B12: 7,
-      A13: "待核验", B13: 2, D10: "关键指标", D11: "整体完成率", E11: "69.5%",
-      D12: "正常项目", E12: 3, D13: "关注项目", E13: 1
+      A3: "序号",
+      B3: "项目名称",
+      C3: "项目代码",
+      D3: "负责人",
+      E3: "计划进度",
+      F3: "实际进度",
+      G3: "本周变化",
+      H3: "当前状态",
+      I3: "更新时间",
+      J3: "备注",
+      A4: 1,
+      B4: "年度重点项目",
+      C4: "XM-001",
+      D4: "王宁",
+      E4: "72%",
+      F4: "74%",
+      G4: "+2.0%",
+      H4: "正常",
+      I4: "10:32",
+      J4: "按计划推进",
+      A5: 2,
+      B5: "运营效率提升",
+      C5: "XM-002",
+      D5: "李然",
+      E5: "58%",
+      F5: "55%",
+      G5: "-1.2%",
+      H5: "关注",
+      I5: "10:32",
+      J5: "等待外部确认",
+      A6: 3,
+      B6: "供应链优化",
+      C6: "XM-003",
+      D6: "陈嘉",
+      E6: "66%",
+      F6: "69%",
+      G6: "+3.4%",
+      H6: "正常",
+      I6: "10:32",
+      J6: "阶段目标完成",
+      A7: 4,
+      B7: "客户服务改造",
+      C7: "XM-004",
+      D7: "赵屿",
+      E7: "81%",
+      F7: "80%",
+      G7: "+0.6%",
+      H7: "正常",
+      I7: "10:32",
+      J7: "本周验收",
+      A10: "本周摘要",
+      A11: "完成事项",
+      B11: 12,
+      A12: "进行中",
+      B12: 7,
+      A13: "待核验",
+      B13: 2,
+      D10: "关键指标",
+      D11: "整体完成率",
+      E11: "69.5%",
+      D12: "正常项目",
+      E12: 3,
+      D13: "关注项目",
+      E13: 1
     }
   },
   {
@@ -36,12 +92,51 @@ let sheets: ExcelSheetData[] = [
     name: "进度跟踪",
     cells: {
       A1: "项目执行进度跟踪表",
-      A3: "日期", B3: "项目", C3: "工作事项", D3: "计划完成", E3: "实际完成",
-      F3: "偏差", G3: "状态", H3: "下一步动作", I3: "责任人",
-      A4: "7月8日", B4: "XM-001", C4: "需求确认", D4: "100%", E4: "100%", F4: "0%", G4: "完成", H4: "进入实施", I4: "王宁",
-      A5: "7月9日", B5: "XM-002", C5: "数据核验", D5: "80%", E5: "72%", F5: "-8%", G5: "关注", H5: "补充数据", I5: "李然",
-      A6: "7月10日", B6: "XM-003", C6: "方案评审", D6: "60%", E6: "65%", F6: "+5%", G6: "正常", H6: "形成纪要", I6: "陈嘉",
-      A7: "7月11日", B7: "XM-004", C7: "阶段验收", D7: "75%", E7: "74%", F7: "-1%", G7: "正常", H7: "修订材料", I7: "赵屿"
+      A3: "日期",
+      B3: "项目",
+      C3: "工作事项",
+      D3: "计划完成",
+      E3: "实际完成",
+      F3: "偏差",
+      G3: "状态",
+      H3: "下一步动作",
+      I3: "责任人",
+      A4: "7月8日",
+      B4: "XM-001",
+      C4: "需求确认",
+      D4: "100%",
+      E4: "100%",
+      F4: "0%",
+      G4: "完成",
+      H4: "进入实施",
+      I4: "王宁",
+      A5: "7月9日",
+      B5: "XM-002",
+      C5: "数据核验",
+      D5: "80%",
+      E5: "72%",
+      F5: "-8%",
+      G5: "关注",
+      H5: "补充数据",
+      I5: "李然",
+      A6: "7月10日",
+      B6: "XM-003",
+      C6: "方案评审",
+      D6: "60%",
+      E6: "65%",
+      F6: "+5%",
+      G6: "正常",
+      H6: "形成纪要",
+      I6: "陈嘉",
+      A7: "7月11日",
+      B7: "XM-004",
+      C7: "阶段验收",
+      D7: "75%",
+      E7: "74%",
+      F7: "-1%",
+      G7: "正常",
+      H7: "修订材料",
+      I7: "赵屿"
     }
   },
   {
@@ -49,15 +144,45 @@ let sheets: ExcelSheetData[] = [
     name: "动态记录",
     cells: {
       A1: "工作动态与事项记录",
-      A3: "时间", B3: "类别", C3: "关联项目", D3: "事项摘要", E3: "优先级", F3: "处理状态", G3: "记录人",
-      A4: "09:20", B4: "会议", C4: "XM-001", D4: "完成阶段方案评审", E4: "普通", F4: "已处理", G4: "王宁",
-      A5: "10:05", B5: "数据", C5: "XM-002", D5: "收到最新外部数据", E5: "关注", F5: "核验中", G5: "李然",
-      A6: "10:28", B6: "进度", C6: "XM-003", D6: "里程碑状态更新", E6: "普通", F6: "已处理", G6: "陈嘉",
-      A7: "11:10", B7: "提醒", C7: "XM-004", D7: "阶段材料待补充", E7: "重要", F7: "待处理", G7: "赵屿"
+      A3: "时间",
+      B3: "类别",
+      C3: "关联项目",
+      D3: "事项摘要",
+      E3: "优先级",
+      F3: "处理状态",
+      G3: "记录人",
+      A4: "09:20",
+      B4: "会议",
+      C4: "XM-001",
+      D4: "完成阶段方案评审",
+      E4: "普通",
+      F4: "已处理",
+      G4: "王宁",
+      A5: "10:05",
+      B5: "数据",
+      C5: "XM-002",
+      D5: "收到最新外部数据",
+      E5: "关注",
+      F5: "核验中",
+      G5: "李然",
+      A6: "10:28",
+      B6: "进度",
+      C6: "XM-003",
+      D6: "里程碑状态更新",
+      E6: "普通",
+      F6: "已处理",
+      G6: "陈嘉",
+      A7: "11:10",
+      B7: "提醒",
+      C7: "XM-004",
+      D7: "阶段材料待补充",
+      E7: "重要",
+      F7: "待处理",
+      G7: "赵屿"
     }
   }
 ];
-let customSheetState = loadCustomSheet();
+const customSheetState = loadCustomSheet();
 let latestSnapshot: AppSnapshot | null = null;
 let selectedTrendCode = "";
 let trendRequestGeneration = 0;
@@ -73,6 +198,8 @@ let selectedRow = 4;
 let selectedColumn = 2;
 let zoom = 100;
 let gridlines = true;
+/** 上一次写入 DOM 的单元格文本，键为单元格地址（网格重建时清空）。 */
+const lastRenderedCells = new Map<string, string>();
 
 rootElement.innerHTML = `
   <main class="excel-app">
@@ -140,7 +267,9 @@ rootElement.addEventListener("click", (event) => {
   if (!target) return;
   if (target.dataset.ribbon) {
     activeRibbon = target.dataset.ribbon as RibbonTab;
-    document.querySelectorAll("[data-ribbon]").forEach((item) => item.classList.toggle("active", item === target));
+    document
+      .querySelectorAll("[data-ribbon]")
+      .forEach((item) => item.classList.toggle("active", item === target));
     renderRibbon();
   }
   if (target.dataset.sheetIndex !== undefined) {
@@ -166,12 +295,20 @@ rootElement.addEventListener("click", (event) => {
   }
   if (target.dataset.zoom) setZoom(zoom + (target.dataset.zoom === "up" ? 5 : -5));
   if (target.dataset.command === "trend-refresh") void loadTrendChart(true);
-  if (target.dataset.window) void window.floatingStock?.controlExcelWindow(target.dataset.window as "minimize" | "maximize" | "close");
+  if (target.dataset.window)
+    void window.floatingStock?.controlExcelWindow(
+      target.dataset.window as "minimize" | "maximize" | "close"
+    );
 });
 
 rootElement.addEventListener("dblclick", (event) => {
   const cell = (event.target as HTMLElement).closest<HTMLElement>("[data-cell]");
-  if (!cell?.dataset.cell || activeSheet()?.id !== "custom" || !isEditableExcelAddress(cell.dataset.cell)) return;
+  if (
+    !cell?.dataset.cell ||
+    activeSheet()?.id !== "custom" ||
+    !isEditableExcelAddress(cell.dataset.cell)
+  )
+    return;
   formulaInput.focus();
   selectAllText(formulaInput);
 });
@@ -185,7 +322,8 @@ rootElement.addEventListener("change", (event) => {
 
 gridViewport.addEventListener("keydown", (event) => {
   if (activeSheet()?.id === "trend") return;
-  if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Tab"].includes(event.key)) return;
+  if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Tab"].includes(event.key))
+    return;
   event.preventDefault();
   if (event.key === "ArrowUp") selectedRow -= 1;
   if (event.key === "ArrowDown" || event.key === "Enter") selectedRow += 1;
@@ -204,7 +342,8 @@ formulaInput.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape") {
     event.preventDefault();
-    formulaInput.textContent = activeSheet()?.cells[`${columnName(selectedColumn)}${selectedRow}`]?.toString() ?? "";
+    formulaInput.textContent =
+      activeSheet()?.cells[`${columnName(selectedColumn)}${selectedRow}`]?.toString() ?? "";
     formulaInput.blur();
   }
 });
@@ -241,18 +380,22 @@ function renderGrid(): void {
   const head = `<thead><tr><th class="corner"></th>${columns.map((column) => `<th>${column}</th>`).join("")}</tr></thead>`;
   const rows = Array.from({ length: rowCount }, (_, rowIndex) => {
     const row = rowIndex + 1;
-    return `<tr><th class="row-number">${row}</th>${columns.map((column, columnIndex) => {
-      const address = `${column}${row}`;
-      const value = sheet.cells[address] ?? "";
-      const classes = cellClasses(sheet, row, columnIndex, value);
-      if (row === 1 && columnIndex === 0) {
-        return `<td colspan="6" class="${classes}" data-cell="${address}" data-row="${row}" data-column="1">${escapeHtml(String(value))}</td>`;
-      }
-      if (row === 1 && columnIndex > 0 && columnIndex < 6) return "";
-      return `<td class="${classes}" data-cell="${address}" data-row="${row}" data-column="${columnIndex + 1}">${escapeHtml(String(value))}</td>`;
-    }).join("")}</tr>`;
+    return `<tr><th class="row-number">${row}</th>${columns
+      .map((column, columnIndex) => {
+        const address = `${column}${row}`;
+        const value = sheet.cells[address] ?? "";
+        const classes = cellClasses(sheet, row, columnIndex, value);
+        if (row === 1 && columnIndex === 0) {
+          return `<td colspan="6" class="${classes}" data-cell="${address}" data-row="${row}" data-column="1">${escapeHtml(String(value))}</td>`;
+        }
+        if (row === 1 && columnIndex > 0 && columnIndex < 6) return "";
+        return `<td class="${classes}" data-cell="${address}" data-row="${row}" data-column="${columnIndex + 1}">${escapeHtml(String(value))}</td>`;
+      })
+      .join("")}</tr>`;
   }).join("");
   grid.innerHTML = `${head}<tbody>${rows}</tbody>`;
+  // 网格被整体重建，之前记录的单元格文本全部失效。
+  lastRenderedCells.clear();
   grid.classList.toggle("hide-gridlines", !gridlines);
   setZoom(zoom);
 }
@@ -264,43 +407,63 @@ function applySnapshot(snapshot: AppSnapshot): void {
   renderSheetTabs();
   updateVisibleCells();
   const updatedAt = snapshot.feeds.quotes.lastSuccessAt;
-  statusText.textContent = updatedAt
-    ? `已同步 ${formatStatusTime(updatedAt)}`
-    : "等待数据";
+  statusText.textContent = updatedAt ? `已同步 ${formatStatusTime(updatedAt)}` : "等待数据";
   updateStatusSummary();
 }
 
 function updateVisibleCells(): void {
   const sheet = sheets[activeSheetIndex]!;
   if (sheet.id === "trend") {
-    renderTrendPanel(trendCache.get(selectedTrendCode), trendCache.has(selectedTrendCode) ? "" : "选择项目后按需载入趋势数据");
+    renderTrendPanel(
+      trendCache.get(selectedTrendCode),
+      trendCache.has(selectedTrendCode) ? "" : "选择项目后按需载入趋势数据"
+    );
     return;
   }
   grid.dataset.sheetId = sheet.id;
   grid.querySelectorAll<HTMLTableCellElement>("td[data-cell]").forEach((cell) => {
     const address = cell.dataset.cell!;
+    const raw = sheet.cells[address] ?? "";
+    const value = String(raw);
+    // 只更新真正变化的单元格：未变化时保留 DOM 上已有的 class（含手动格式）与选区，
+    // 同时避免每次推送重写全部 18×60 个单元格。
+    if (lastRenderedCells.get(address) === value) return;
+    lastRenderedCells.set(address, value);
     const row = Number(cell.dataset.row);
     const columnIndex = Number(cell.dataset.column) - 1;
-    const value = sheet.cells[address] ?? "";
     const selected = cell.classList.contains("selected");
     const manualFormats = [...cell.classList].filter((name) => name.startsWith("format-"));
-    cell.className = cellClasses(sheet, row, columnIndex, value);
+    // 传原始值给 cellClasses：它会按 typeof 区分数字与文本。
+    cell.className = cellClasses(sheet, row, columnIndex, raw);
     if (selected) cell.classList.add("selected");
     cell.classList.add(...manualFormats);
-    cell.textContent = String(value);
+    cell.textContent = value;
   });
   const address = `${columnName(selectedColumn)}${selectedRow}`;
-  formulaInput.textContent = sheet.cells[address]?.toString() ?? "";
+  // 用户正在编辑栏输入时不得覆盖，否则每次轮询都会把进行中的编辑静默还原
+  // （commitCustomCell 只在 blur 时提交，输入会直接丢失）。
+  if (document.activeElement !== formulaInput) {
+    formulaInput.textContent = sheet.cells[address]?.toString() ?? "";
+  }
 }
 
-function cellClasses(sheet: ExcelSheetData, row: number, columnIndex: number, value: string | number): string {
+function cellClasses(
+  sheet: ExcelSheetData,
+  row: number,
+  columnIndex: number,
+  value: string | number
+): string {
   return [
     row === 1 && columnIndex === 0 ? "sheet-title" : "",
-    row === 3 && columnIndex < (sheet.id === "activity" ? 7 : sheet.id === "custom" ? 5 : 10) ? "table-header" : "",
+    row === 3 && columnIndex < (sheet.id === "activity" ? 7 : sheet.id === "custom" ? 5 : 10)
+      ? "table-header"
+      : "",
     typeof value === "number" || /%$|^[-+]?\d/.test(String(value)) ? "numeric" : "",
     ["关注", "重要", "延迟", "冲突", "备用"].includes(String(value)) ? "attention-cell" : "",
     ["正常", "完整"].includes(String(value)) ? "ok-cell" : ""
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function formatStatusTime(value: string): string {
@@ -325,7 +488,22 @@ function updateStatusSummary(): void {
 }
 
 function renderSheetTabs(): void {
-  sheetTabs.innerHTML = sheets.map((sheet, index) => `<button class="${index === activeSheetIndex ? "active" : ""}" data-sheet-index="${index}">${escapeHtml(sheet.name)}</button>`).join("");
+  // 就地更新标签按钮，避免每次快照推送都销毁重建（会丢失焦点与 :hover/:active 状态）。
+  const buttons = [...sheetTabs.querySelectorAll<HTMLButtonElement>("button[data-sheet-index]")];
+  if (buttons.length !== sheets.length) {
+    sheetTabs.innerHTML = sheets
+      .map(
+        (sheet, index) =>
+          `<button class="${index === activeSheetIndex ? "active" : ""}" data-sheet-index="${index}">${escapeHtml(sheet.name)}</button>`
+      )
+      .join("");
+    return;
+  }
+  buttons.forEach((button, index) => {
+    button.classList.toggle("active", index === activeSheetIndex);
+    const label = sheets[index]?.name ?? "";
+    if (button.textContent !== label) button.textContent = label;
+  });
 }
 
 function selectCell(row: number, column: number, focus: boolean): void {
@@ -341,7 +519,11 @@ function selectCell(row: number, column: number, focus: boolean): void {
   formulaInput.textContent = sheets[activeSheetIndex]!.cells[address]?.toString() ?? "";
   const editable = activeSheet()?.id === "custom" && isEditableExcelAddress(address);
   setFormulaEditing(editable);
-  statusText.textContent = editable ? "双击单元格或在编辑栏输入" : formulaInput.textContent ? "就绪" : "输入";
+  statusText.textContent = editable
+    ? "双击单元格或在编辑栏输入"
+    : formulaInput.textContent
+      ? "就绪"
+      : "输入";
   cell.scrollIntoView({ block: "nearest", inline: "nearest" });
   if (focus) gridViewport.focus({ preventScroll: true });
 }
@@ -408,11 +590,16 @@ function trendOptions(): Array<{ code: string; market: "SH" | "SZ" | "BJ"; name:
     .slice(0, 10)
     .flatMap((item) => {
       const security = securities.get(item.securityCode);
-      return security ? [{
-        code: security.code,
-        market: security.market,
-        name: security.alias || security.name || quotes.get(security.code)?.name || security.code
-      }] : [];
+      return security
+        ? [
+            {
+              code: security.code,
+              market: security.market,
+              name:
+                security.alias || security.name || quotes.get(security.code)?.name || security.code
+            }
+          ]
+        : [];
     });
 }
 
@@ -453,9 +640,12 @@ async function loadTrendChart(force = false): Promise<void> {
 
 function renderTrendPanel(detail?: MarketDetail, message = ""): void {
   const options = trendOptions();
-  const optionHtml = options.map((item) =>
-    `<option value="${escapeHtml(item.code)}" ${item.code === selectedTrendCode ? "selected" : ""}>${escapeHtml(item.name)}　${escapeHtml(item.code)}</option>`
-  ).join("");
+  const optionHtml = options
+    .map(
+      (item) =>
+        `<option value="${escapeHtml(item.code)}" ${item.code === selectedTrendCode ? "selected" : ""}>${escapeHtml(item.name)}　${escapeHtml(item.code)}</option>`
+    )
+    .join("");
   const model = detail ? buildExcelBollChart(detail.daily.items) : null;
   trendPanel.innerHTML = `
     <div class="trend-toolbar">
@@ -469,10 +659,12 @@ function renderTrendPanel(detail?: MarketDetail, message = ""): void {
 }
 
 function renderTrendSvg(model: NonNullable<ReturnType<typeof buildExcelBollChart>>): string {
-  const gridLines = [0.25, 0.5, 0.75].map((ratio) => {
-    const y = 24 + ratio * (model.height - 62);
-    return `<line x1="54" x2="${model.width - 18}" y1="${y}" y2="${y}" />`;
-  }).join("");
+  const gridLines = [0.25, 0.5, 0.75]
+    .map((ratio) => {
+      const y = 24 + ratio * (model.height - 62);
+      return `<line x1="54" x2="${model.width - 18}" y1="${y}" y2="${y}" />`;
+    })
+    .join("");
   return `<div class="trend-chart-card">
     <div class="trend-legend"><span class="close-key">收盘</span><span class="upper-key">上轨</span><span class="mid-key">中轨</span><span class="lower-key">下轨</span></div>
     <svg class="trend-chart" viewBox="0 0 ${model.width} ${model.height}" role="img" aria-label="项目布林线趋势图">
@@ -544,7 +736,7 @@ function columnName(index: number): string {
   let value = index;
   while (value > 0) {
     value -= 1;
-    result = String.fromCharCode(65 + value % 26) + result;
+    result = String.fromCharCode(65 + (value % 26)) + result;
     value = Math.floor(value / 26);
   }
   return result;
@@ -552,10 +744,4 @@ function columnName(index: number): string {
 
 function columnNumber(name: string): number {
   return [...name].reduce((value, character) => value * 26 + character.charCodeAt(0) - 64, 0);
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  })[character]!);
 }

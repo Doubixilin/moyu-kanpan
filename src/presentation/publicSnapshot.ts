@@ -1,4 +1,9 @@
-import type { AlertPriority, AppSnapshot, MarketDetail, QuoteQualityState } from "../domain/types.js";
+import type {
+  AlertPriority,
+  AppSnapshot,
+  MarketDetail,
+  QuoteQualityState
+} from "../domain/types.js";
 
 export interface PublicTrend {
   code: string;

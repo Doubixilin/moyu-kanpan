@@ -35,9 +35,7 @@ async function verifyRendererImports(entries) {
     visited.add(modulePath);
 
     const source = await readFile(modulePath, "utf8");
-    const imports = source.matchAll(
-      /\bfrom\s+["'](\.[^"']+)["']|\bimport\s+["'](\.[^"']+)["']/g
-    );
+    const imports = source.matchAll(/\bfrom\s+["'](\.[^"']+)["']|\bimport\s+["'](\.[^"']+)["']/g);
     for (const match of imports) {
       const specifier = match[1] ?? match[2];
       const dependencyPath = path.resolve(path.dirname(modulePath), specifier);
@@ -49,8 +47,10 @@ async function verifyRendererImports(entries) {
         await readFile(dependencyPath, "utf8");
       } catch {
         throw new Error(
-          "Renderer module missing: " + path.relative(root, dependencyPath) +
-          " imported by " + path.relative(root, modulePath)
+          "Renderer module missing: " +
+            path.relative(root, dependencyPath) +
+            " imported by " +
+            path.relative(root, modulePath)
         );
       }
       pending.push(dependencyPath);

@@ -175,13 +175,28 @@ npm run package:win
 
 ## 开发与验证
 
+需要 **Node.js 24**（`src/services/newsEvents.ts` 使用 `node:sqlite`，该模块在 Node 22.x 仍需 `--experimental-sqlite`）。
+
 ```bash
 npm install
+npm run verify        # 类型检查 + lint + 格式检查 + 单元测试 + 构建（推荐，等价于 CI）
 npm test
+npm run test:coverage # 单元测试 + 覆盖率门槛（阈值见 .c8rc.json）
+npm run lint
+npm run format        # prettier 自动格式化
+npm run typecheck
 npm run build
 npm run smoke:data
 npm run smoke:news
 ```
+
+`npm run verify` 串起 CI 的全部检查；`.github/workflows/ci.yml` 在每次 push 与 PR 上执行同样的步骤（测试一步用 `test:coverage`，覆盖率低于 `.c8rc.json` 里的阈值会失败）。
+
+ESLint 使用类型感知规则（`typescript-eslint` 的 `recommendedTypeChecked`）并额外收紧 `no-explicit-any`、`no-floating-promises`、`no-unused-vars`；规则与豁免理由见 `eslint.config.mjs`。代码风格由 Prettier 统一（`printWidth: 100`、无行尾逗号），`docs/` 与 `*.css` 不在其管辖范围（中文排版与样式表另行处理）。
+
+覆盖率是**回归下限**（略低于当前实测值），不是质量目标——当前实测约为行 91%、分支 74%、函数 91%。
+
+真实接口的 smoke（`smoke:data` / `smoke:news`）依赖外网、结果会随行情波动，因此不进 CI，发布前手动执行。
 
 项目使用 TypeScript 编写，Electron 主进程负责 provider、轮询、配置、安全存储、窗口与本地网页服务；各个渲染界面只消费经过整理的 ViewModel 或脱敏快照。
 

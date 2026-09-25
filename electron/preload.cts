@@ -17,7 +17,8 @@ const api: FloatingStockApi = {
   pauseAlertsToday: () => ipcRenderer.invoke("alerts:pauseToday") as Promise<void>,
   resumeAlerts: () => ipcRenderer.invoke("alerts:resume") as Promise<void>,
   onSnapshot: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, snapshot: AppSnapshot) => callback(snapshot);
+    const listener = (_event: Electron.IpcRendererEvent, snapshot: AppSnapshot) =>
+      callback(snapshot);
     ipcRenderer.on("snapshot:update", listener);
     return () => ipcRenderer.off("snapshot:update", listener);
   },
@@ -25,8 +26,7 @@ const api: FloatingStockApi = {
   saveSettings: (settings) =>
     ipcRenderer.invoke("settings:save", settings) as Promise<UserSettings>,
   getAiStatus: () => ipcRenderer.invoke("ai:status") as Promise<AiRuntimeStatus>,
-  setAiApiKey: (apiKey) =>
-    ipcRenderer.invoke("ai:setApiKey", apiKey) as Promise<AiRuntimeStatus>,
+  setAiApiKey: (apiKey) => ipcRenderer.invoke("ai:setApiKey", apiKey) as Promise<AiRuntimeStatus>,
   clearAiApiKey: () => ipcRenderer.invoke("ai:clearApiKey") as Promise<AiRuntimeStatus>,
   testAiConnection: (request: { ai: AiSettings; apiKey?: string }) =>
     ipcRenderer.invoke("ai:testConnection", request) as Promise<AiRuntimeStatus>,
@@ -54,8 +54,7 @@ const api: FloatingStockApi = {
     ipcRenderer.invoke("appearance:setBackgroundOpacity", opacity) as Promise<UserSettings>,
   toggleTheme: () => ipcRenderer.invoke("appearance:toggleTheme") as Promise<UserSettings>,
   openExternal: (url) => ipcRenderer.invoke("link:open", url) as Promise<void>,
-  copyNewsContext: (eventId) =>
-    ipcRenderer.invoke("news:copyContext", eventId) as Promise<string>,
+  copyNewsContext: (eventId) => ipcRenderer.invoke("news:copyContext", eventId) as Promise<string>,
   previewProfile: (request: { text: string; mode: ProfileImportMode }) =>
     ipcRenderer.invoke("profile:preview", request) as Promise<ProfilePreview>,
   applyProfile: (request: { text: string; mode: ProfileImportMode }) =>
@@ -63,8 +62,7 @@ const api: FloatingStockApi = {
   copyProfilePrompt: () => ipcRenderer.invoke("profile:copyPrompt") as Promise<string>,
   copyProfileExport: () => ipcRenderer.invoke("profile:copyExport") as Promise<string>,
   hasProfileBackup: () => ipcRenderer.invoke("profile:hasBackup") as Promise<boolean>,
-  restoreProfileBackup: () =>
-    ipcRenderer.invoke("profile:restoreBackup") as Promise<UserSettings>,
+  restoreProfileBackup: () => ipcRenderer.invoke("profile:restoreBackup") as Promise<UserSettings>,
   toggleClickThrough: (enabled) =>
     ipcRenderer.invoke("window:toggleClickThrough", enabled) as Promise<void>
 };

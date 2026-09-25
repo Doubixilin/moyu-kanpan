@@ -13,6 +13,15 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["electron", "src/domain", "src/providers", "src/services", "src/ai", "src/settings", "src/config.ts", "src/global.d.ts"],
+  "include": [
+    "electron",
+    "src/domain",
+    "src/providers",
+    "src/services",
+    "src/ai",
+    "src/settings",
+    "src/config.ts",
+    "src/global.d.ts"
+  ],
   "exclude": ["src/**/__tests__/**", "src/**/*.test.ts"]
 }

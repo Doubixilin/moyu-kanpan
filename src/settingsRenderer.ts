@@ -1,20 +1,27 @@
-import {
-  DEFAULT_BOSS_KEY_ACCELERATOR,
-  parseBossKeyAccelerator
-} from "./shortcut.js";
+import { DEFAULT_BOSS_KEY_ACCELERATOR, parseBossKeyAccelerator } from "./shortcut.js";
 import type { AiRuntimeStatus } from "./domain/types";
-import type {
-  HoldingAlertRules,
-  NewsMode,
-  QuoteField,
-  QuoteSort,
-  RefreshMode,
-  TabConfig,
-  TabType,
-  ThemeMode,
-  UserSettings
-} from "./config";
+import type { HoldingAlertRules, QuoteField, TabConfig, TabType, UserSettings } from "./config";
 import type { ProfileImportMode, ProfilePreview } from "./settings/profile";
+import { escapeAttr, escapeHtml } from "./presentation/format.js";
+import {
+  HOLDING_ALERT_NUMBER_FIELDS,
+  HOLDING_ROW_FIELDS,
+  nullableInputNumber,
+  RISK_GROUP_ROW_FIELDS,
+  SETTINGS_FIELD_UPDATERS,
+  TAB_ROW_FIELDS,
+  WATCH_ROW_FIELDS,
+  type FieldElement
+} from "./settings/fields.js";
+import {
+  holdingAlertInput,
+  holdingRuleDescriptions,
+  nullableNumber,
+  option,
+  renderAddHolding,
+  renderRiskGroupSetting,
+  renderWatchItem
+} from "./settings/views.js";
 
 const quoteFields: Array<{ value: QuoteField; label: string }> = [
   { value: "price", label: "当前价" },
@@ -29,20 +36,7 @@ const quoteFields: Array<{ value: QuoteField; label: string }> = [
   { value: "mainInflow", label: "主力净流入" }
 ];
 
-type HoldingAlertNumberField = Exclude<keyof HoldingAlertRules, "enabled">;
 type SettingsPage = "general" | "portfolio" | "quotes" | "news-ai" | "data";
-const holdingAlertNumberFields: Record<string, HoldingAlertNumberField> = {
-  "holding-stop-loss": "stopLossPrice",
-  "holding-watch-price": "watchPrice",
-  "holding-price-above": "priceAbove",
-  "holding-price-below": "priceBelow",
-  "holding-rise-percent": "risePercent",
-  "holding-fall-percent": "fallPercent",
-  "holding-daily-profit": "dailyProfitAmount",
-  "holding-daily-loss": "dailyLossAmount",
-  "holding-total-profit": "totalProfitAmount",
-  "holding-total-loss": "totalLossAmount"
-};
 const tabTypeLabels: Record<TabType, string> = {
   holdings: "持仓页",
   watchlist: "自选页",
@@ -73,7 +67,8 @@ const rootElement = root;
 
 function render(): void {
   if (!settings) {
-    rootElement.innerHTML = '<main class="settings-shell"><p class="loading">正在读取设置…</p></main>';
+    rootElement.innerHTML =
+      '<main class="settings-shell"><p class="loading">正在读取设置…</p></main>';
     return;
   }
 
@@ -182,11 +177,13 @@ function render(): void {
           <span>${holdingRuleSummary()}</span>
         </div>
         <div class="holding-settings-list">
-          ${settings.holdings.length
-            ? settings.holdings.map(renderHoldingSetting).join("")
-            : '<div class="inline-empty">尚未配置持仓</div>'}
+          ${
+            settings.holdings.length
+              ? settings.holdings.map(renderHoldingSetting).join("")
+              : '<div class="inline-empty">尚未配置持仓</div>'
+          }
         </div>
-        ${renderAddHolding()}
+        ${renderAddHolding(settings.securities, settings.holdings)}
       </section>
 
       <section class="panel risk-panel ${settingsPageClass("portfolio")}">
@@ -242,7 +239,11 @@ function render(): void {
           <span>${settings.watchlist.length}/50</span>
         </div>
         <div class="watchlist">
-          ${settings.watchlist.map(renderWatchItem).join("")}
+          ${settings.watchlist
+            .map((item, index, list) =>
+              renderWatchItem(item, index, list.length, securityFor(item.securityCode)?.alias || "")
+            )
+            .join("")}
         </div>
         <div class="add-row">
           <input id="new-code" inputmode="numeric" maxlength="6" placeholder="股票代码，如 600519" />
@@ -259,12 +260,16 @@ function render(): void {
           </div>
         </div>
         <div class="field-grid">
-          ${quoteFields.map(({ value, label }) => `
+          ${quoteFields
+            .map(
+              ({ value, label }) => `
             <label class="check-card">
               <input type="checkbox" data-setting="field" value="${value}" ${settings?.quotes.fields.includes(value) ? "checked" : ""} />
               <span>${label}</span>
             </label>
-          `).join("")}
+          `
+            )
+            .join("")}
         </div>
         <label class="form-row">
           <span>股票排序</span>
@@ -370,11 +375,15 @@ function renderSettingsNavigation(): string {
   ];
   return `
     <nav class="settings-tab-nav" aria-label="设置分类">
-      ${pages.map((page) => `
+      ${pages
+        .map(
+          (page) => `
         <button type="button" data-action="settings-page" data-page="${page.id}"
           class="${activeSettingsPage === page.id ? "active" : ""}"
           aria-selected="${activeSettingsPage === page.id}">${page.label}</button>
-      `).join("")}
+      `
+        )
+        .join("")}
     </nav>
   `;
 }
@@ -387,7 +396,8 @@ function holdingRuleSummary(): string {
   if (!settings) return "";
   const enabledHoldings = settings.holdings.filter((holding) => holding.alertRules.enabled).length;
   const ruleCount = settings.holdings.reduce(
-    (count, holding) => count + holdingRuleDescriptions(holding.alertRules, holding.costPrice).length,
+    (count, holding) =>
+      count + holdingRuleDescriptions(holding.alertRules, holding.costPrice).length,
     0
   );
   return `${settings.holdings.length} 只 · ${enabledHoldings} 只提醒 · ${ruleCount} 条规则`;
@@ -445,40 +455,47 @@ function renderProfilePreview(preview: ProfilePreview): string {
   ] as const;
   return `
     <div class="profile-preview ${preview.valid ? "valid" : "invalid"}">
-      <strong>${preview.valid ? preview.hasChanges ? "校验通过，可以导入" : "校验通过，没有变化" : "校验失败，不会应用"}</strong>
+      <strong>${preview.valid ? (preview.hasChanges ? "校验通过，可以导入" : "校验通过，没有变化") : "校验失败，不会应用"}</strong>
       <div class="profile-diff-grid">
         ${rows.map(([label, codes]) => `<span><b>${label}</b>${codes.length ? escapeHtml(codes.join("、")) : "无"}</span>`).join("")}
         <span><b>提醒规则变化</b>${diff.alertRuleChanges}</span>
         <span><b>全局风险设置</b>${diff.riskSettingsChanged ? "有变化" : "无变化"}</span>
       </div>
-      ${preview.issues.length ? `
+      ${
+        preview.issues.length
+          ? `
         <div class="profile-issues">
           ${preview.issues.map((issue) => `<span class="${issue.severity}">${issue.severity === "error" ? "错误" : "提醒"} · ${escapeHtml(issue.path)}：${escapeHtml(issue.message)}</span>`).join("")}
         </div>
-      ` : ""}
+      `
+          : ""
+      }
     </div>
   `;
 }
 
 function renderTabSetting(tab: TabConfig, index: number): string {
-  const stockSelector = !tab.builtIn && tab.type === "stock-list"
-    ? `
+  const stockSelector =
+    !tab.builtIn && tab.type === "stock-list"
+      ? `
       <details class="tab-security-picker">
         <summary>选择股票（${tab.securityCodes.length}）</summary>
         <div class="security-check-grid">
-          ${settings!.watchlist.map((item) => {
-            const security = securityFor(item.securityCode);
-            return `
+          ${settings!.watchlist
+            .map((item) => {
+              const security = securityFor(item.securityCode);
+              return `
               <label>
                 <input type="checkbox" data-setting="tab-security" data-tab-id="${escapeAttr(tab.id)}" value="${item.securityCode}" ${tab.securityCodes.includes(item.securityCode) ? "checked" : ""} />
                 <span>${escapeHtml(security?.alias || security?.name || item.securityCode)}</span>
               </label>
             `;
-          }).join("")}
+            })
+            .join("")}
         </div>
       </details>
     `
-    : "";
+      : "";
 
   return `
     <div class="tab-setting-block">
@@ -500,10 +517,7 @@ function renderTabSetting(tab: TabConfig, index: number): string {
   `;
 }
 
-function renderHoldingSetting(
-  holding: UserSettings["holdings"][number],
-  index: number
-): string {
+function renderHoldingSetting(holding: UserSettings["holdings"][number], index: number): string {
   const security = securityFor(holding.securityCode);
   const rules = holding.alertRules;
   const ruleDescriptions = holdingRuleDescriptions(rules, holding.costPrice);
@@ -557,87 +571,6 @@ function renderHoldingSetting(
   `;
 }
 
-function holdingAlertInput(setting: string, label: string, value: number | null): string {
-  return `<label><span>${label}</span><input data-setting="${setting}" type="number" min="0" step="0.001" value="${nullableNumber(value)}" placeholder="不启用" /></label>`;
-}
-
-function holdingRuleDescriptions(rules: HoldingAlertRules, costPrice: number): string[] {
-  const descriptions: string[] = [];
-  if (rules.stopLossPrice != null) descriptions.push(`现价跌破 ${rules.stopLossPrice} 时提醒`);
-  if (rules.watchPrice != null) {
-    descriptions.push(`现价${rules.watchPrice >= costPrice ? "升至" : "降至"} ${rules.watchPrice} 时提醒`);
-  }
-  if (rules.priceAbove != null) descriptions.push(`现价向上突破 ${rules.priceAbove} 时提醒`);
-  if (rules.priceBelow != null) descriptions.push(`现价向下跌破 ${rules.priceBelow} 时提醒`);
-  if (rules.risePercent != null) descriptions.push(`今日涨幅达到 ${rules.risePercent}% 时提醒`);
-  if (rules.fallPercent != null) descriptions.push(`今日跌幅达到 ${rules.fallPercent}% 时提醒`);
-  if (rules.dailyProfitAmount != null) descriptions.push(`今日盈利达到 ${formatRuleAmount(rules.dailyProfitAmount)} 时提醒`);
-  if (rules.dailyLossAmount != null) descriptions.push(`今日亏损达到 ${formatRuleAmount(rules.dailyLossAmount)} 时提醒`);
-  if (rules.totalProfitAmount != null) descriptions.push(`累计盈利达到 ${formatRuleAmount(rules.totalProfitAmount)} 时提醒`);
-  if (rules.totalLossAmount != null) descriptions.push(`累计亏损达到 ${formatRuleAmount(rules.totalLossAmount)} 时提醒`);
-  return descriptions;
-}
-
-function formatRuleAmount(value: number): string {
-  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(value)} 元`;
-}
-
-function renderRiskGroupSetting(
-  group: UserSettings["risk"]["groups"][number],
-  index: number
-): string {
-  return `
-    <div class="risk-group-row" data-risk-group-index="${index}">
-      <label class="visibility"><input data-setting="risk-group-enabled" type="checkbox" ${group.enabled ? "checked" : ""} /><span>启用</span></label>
-      <input data-setting="risk-group-name" maxlength="16" value="${escapeAttr(group.name)}" aria-label="风险组名称" />
-      <input data-setting="risk-group-profit" type="number" min="0" step="10" value="${nullableNumber(group.profitThreshold)}" placeholder="盈利阈值" />
-      <input data-setting="risk-group-loss" type="number" min="0" step="10" value="${nullableNumber(group.lossThreshold)}" placeholder="亏损阈值" />
-      <button data-action="delete-risk-group" class="danger compact-button" title="删除风险组">×</button>
-    </div>
-  `;
-}
-function renderAddHolding(): string {
-  const available = settings!.securities.filter((security) =>
-    !settings!.holdings.some((holding) => holding.securityCode === security.code)
-  );
-  if (available.length === 0) return "";
-
-  return `
-    <div class="add-row add-holding-row">
-      <select id="new-holding-code">
-        ${available.map((security) =>
-          `<option value="${security.code}">${escapeHtml(security.alias || security.name || security.code)} · ${security.code}</option>`
-        ).join("")}
-      </select>
-      <input id="new-holding-quantity" type="number" min="1" step="1" placeholder="数量" />
-      <input id="new-holding-cost" type="number" min="0.0001" step="0.001" placeholder="成本价" />
-      <button data-action="add-holding">加入持仓</button>
-    </div>
-  `;
-}
-
-function renderWatchItem(
-  item: UserSettings["watchlist"][number],
-  index: number
-): string {
-  const security = securityFor(item.securityCode);
-  return `
-    <div class="watch-row" data-index="${index}">
-      <label class="visibility" title="是否在自选页面显示">
-        <input type="checkbox" data-setting="visible" ${item.visible ? "checked" : ""} />
-        <span>显示</span>
-      </label>
-      <span class="code-readonly">${item.securityCode}</span>
-      <input data-setting="alias" maxlength="16" value="${escapeAttr(security?.alias || "")}" placeholder="显示别名" aria-label="显示别名" />
-      <div class="row-actions">
-        <button data-action="move-up" title="上移" ${index === 0 ? "disabled" : ""}>↑</button>
-        <button data-action="move-down" title="下移" ${index === settings!.watchlist.length - 1 ? "disabled" : ""}>↓</button>
-        <button data-action="delete-stock" class="danger" title="从自选移除">×</button>
-      </div>
-    </div>
-  `;
-}
-
 rootElement.addEventListener("input", handleFormChange);
 rootElement.addEventListener("change", handleFormChange);
 rootElement.addEventListener("click", (event) => void handleClick(event));
@@ -646,23 +579,60 @@ document.addEventListener("keydown", handleBossKeyCapture, true);
 
 function handleHoldingRuleToggle(event: Event): void {
   const opened = event.target;
-  if (!(opened instanceof HTMLDetailsElement) ||
-      !opened.classList.contains("holding-rule-details") || !opened.open) return;
-  rootElement.querySelectorAll<HTMLDetailsElement>(".holding-rule-details[open]")
+  if (
+    !(opened instanceof HTMLDetailsElement) ||
+    !opened.classList.contains("holding-rule-details") ||
+    !opened.open
+  )
+    return;
+  rootElement
+    .querySelectorAll<HTMLDetailsElement>(".holding-rule-details[open]")
     .forEach((details) => {
       if (details !== opened) details.open = false;
     });
 }
 
+/** 行内字段：先由 DOM 定位行索引，再交给声明式表里的更新函数。 */
+function applyRowField<T extends object>(
+  target: Element,
+  rowSelector: string,
+  indexDatasetKey: string,
+  rows: T[],
+  fields: Record<string, (settings: UserSettings, index: number, element: FieldElement) => void>,
+  setting: string
+): boolean {
+  const row = target.closest<HTMLElement>(rowSelector);
+  const index = Number(row?.dataset[indexDatasetKey]);
+  if (!row || !Number.isInteger(index) || !rows[index]) return false;
+  const field = fields[setting];
+  if (!field) return false;
+  field(settings!, index, target as unknown as FieldElement);
+  return true;
+}
+
+/**
+ * 表单字段派发。
+ *
+ * 字段逻辑全部在 `settings/fields.ts` 的声明式表里（纯函数、可单测），这里只负责：
+ * 读取 `data-setting`、定位行上下文、应用副作用（重渲染 / 提示 / 重置录制 / 更新标签）。
+ * 此前这里是一个 190 行、40 多个 `if (setting === "…")` 的分支函数。
+ */
 function handleFormChange(event: Event): void {
   if (!settings) return;
   const target = event.target as HTMLInputElement | HTMLSelectElement;
   const setting = target.dataset.setting;
   if (!setting) return;
 
+  // 这三个字段改的是渲染层自身的状态（草稿文本/模式/文件），不属于 settings。
   if (setting === "profile-text") {
     profileText = target.value;
     profilePreview = null;
+    return;
+  }
+  // API Key 不写入 settings（由主进程用系统安全存储加密），只暂存在渲染层。
+  if (setting === "ai-api-key") {
+    pendingAiApiKey = target.value.slice(0, 2_000);
+    settingsDirty = true;
     return;
   }
   if (setting === "profile-mode") {
@@ -676,154 +646,63 @@ function handleFormChange(event: Event): void {
     if (file) void loadProfileFile(file);
     return;
   }
+
   settingsDirty = true;
 
-  const watchRow = target.closest<HTMLElement>(".watch-row");
-  const watchIndex = Number(watchRow?.dataset.index);
-  if (watchRow && Number.isInteger(watchIndex) && settings.watchlist[watchIndex]) {
-    const item = settings.watchlist[watchIndex];
-    if (setting === "visible") item.visible = (target as HTMLInputElement).checked;
-    if (setting === "alias") {
-      const security = securityFor(item.securityCode);
-      if (security) security.alias = target.value.trimStart().slice(0, 16);
+  if (
+    applyRowField(target, ".watch-row", "index", settings.watchlist, WATCH_ROW_FIELDS, setting) ||
+    applyRowField(
+      target,
+      ".holding-setting-block",
+      "holdingIndex",
+      settings.holdings,
+      HOLDING_ROW_FIELDS,
+      setting
+    )
+  ) {
+    return;
+  }
+  // 持仓提醒的数值字段是 10 个同构输入框，用映射表统一处理。
+  const alertField = HOLDING_ALERT_NUMBER_FIELDS[setting];
+  {
+    const row = target.closest<HTMLElement>(".holding-setting-block");
+    const index = Number(row?.dataset.holdingIndex);
+    if (alertField && row && Number.isInteger(index) && settings.holdings[index]) {
+      settings.holdings[index].alertRules[alertField] = nullableInputNumber(target.value);
+      return;
     }
+  }
+  if (
+    applyRowField(
+      target,
+      ".risk-group-row",
+      "riskGroupIndex",
+      settings.risk.groups,
+      RISK_GROUP_ROW_FIELDS,
+      setting
+    ) ||
+    applyRowField(target, ".tab-setting-row", "tabIndex", settings.tabs, TAB_ROW_FIELDS, setting)
+  ) {
     return;
   }
 
-  const holdingRow = target.closest<HTMLElement>(".holding-setting-block");
-  const holdingIndex = Number(holdingRow?.dataset.holdingIndex);
-  if (holdingRow && Number.isInteger(holdingIndex) && settings.holdings[holdingIndex]) {
-    if (setting === "holding-quantity") {
-      settings.holdings[holdingIndex].quantity = Math.max(1, Math.round(Number(target.value) || 1));
-    }
-    if (setting === "holding-cost") {
-      settings.holdings[holdingIndex].costPrice = Math.max(0.0001, Number(target.value) || 0.0001);
-    }
-    if (setting === "holding-group") settings.holdings[holdingIndex].groupId = target.value || "all";
-    if (setting === "holding-note") settings.holdings[holdingIndex].note = target.value.slice(0, 120);
-    if (setting === "holding-alert-enabled") {
-      settings.holdings[holdingIndex].alertRules.enabled = (target as HTMLInputElement).checked;
-    }
-    const alertField = holdingAlertNumberFields[setting];
-    if (alertField) {
-      settings.holdings[holdingIndex].alertRules[alertField] = nullableInputNumber(target.value);
-    }
-    return;
-  }
-
-  const riskGroupRow = target.closest<HTMLElement>(".risk-group-row");
-  const riskGroupIndex = Number(riskGroupRow?.dataset.riskGroupIndex);
-  if (riskGroupRow && Number.isInteger(riskGroupIndex) && settings.risk.groups[riskGroupIndex]) {
-    const group = settings.risk.groups[riskGroupIndex];
-    if (setting === "risk-group-enabled") group.enabled = (target as HTMLInputElement).checked;
-    if (setting === "risk-group-name") group.name = target.value.trimStart().slice(0, 16);
-    if (setting === "risk-group-profit") group.profitThreshold = nullableInputNumber(target.value);
-    if (setting === "risk-group-loss") group.lossThreshold = nullableInputNumber(target.value);
-    return;
-  }
-
-  const tabRow = target.closest<HTMLElement>(".tab-setting-row");
-  const tabIndex = Number(tabRow?.dataset.tabIndex);
-  if (tabRow && Number.isInteger(tabIndex) && settings.tabs[tabIndex]) {
-    const tab = settings.tabs[tabIndex];
-    if (setting === "tab-visible") tab.visible = (target as HTMLInputElement).checked;
-    if (setting === "tab-title" && !tab.builtIn) tab.title = target.value.trimStart().slice(0, 12);
-    return;
-  }
-
-  if (setting === "tab-security") {
-    const tab = settings.tabs.find((item) => item.id === target.dataset.tabId);
-    const input = target as HTMLInputElement;
-    if (!tab) return;
-    if (input.checked && !tab.securityCodes.includes(input.value)) tab.securityCodes.push(input.value);
-    if (!input.checked) tab.securityCodes = tab.securityCodes.filter((code) => code !== input.value);
-    return;
-  }
-
-  if (setting === "default-tab") settings.navigation.defaultTabId = target.value;
-  if (setting === "remember-tab") settings.navigation.rememberLastTab = (target as HTMLInputElement).checked;
-  if (setting === "always-on-top") settings.window.alwaysOnTop = (target as HTMLInputElement).checked;
-  if (setting === "tray-only") settings.window.trayOnly = (target as HTMLInputElement).checked;
-  if (setting === "click-through") settings.window.clickThrough = (target as HTMLInputElement).checked;
-  if (setting === "window-locked") settings.window.locked = (target as HTMLInputElement).checked;
-  if (setting === "boss-key-enabled") {
-    settings.window.bossKeyEnabled = (target as HTMLInputElement).checked;
-    if (!settings.window.bossKeyEnabled) recordingBossKey = false;
-    if (event.type === "change") render();
-    return;
-  }
-
-  if (setting === "ai-enabled") settings.ai.enabled = (target as HTMLInputElement).checked;
-  if (setting === "ai-provider") {
-    settings.ai.provider = target.value === "custom" ? "custom" : "deepseek";
-    if (settings.ai.provider === "deepseek") {
-      settings.ai.baseUrl = "https://api.deepseek.com";
-      settings.ai.model = "deepseek-v4-flash";
-    } else {
-      settings.ai.baseUrl = "https://api.openai.com/v1";
-      settings.ai.model = "gpt-4.1-mini";
-    }
-    if (event.type === "change") render();
-    return;
-  }
-  if (setting === "ai-base-url") settings.ai.baseUrl = target.value.trimStart().slice(0, 300);
-  if (setting === "ai-model") settings.ai.model = target.value.trimStart().slice(0, 100);
-  if (setting === "ai-timeout") {
-    settings.ai.timeoutSeconds = Math.min(120, Math.max(5, Math.round(Number(target.value) || 20)));
-  }
-  if (setting === "ai-api-key") pendingAiApiKey = target.value.slice(0, 2_000);
-
-  if (setting === "field") {
-    const input = target as HTMLInputElement;
-    const field = input.value as QuoteField;
-    if (input.checked && !settings.quotes.fields.includes(field)) {
-      if (settings.quotes.fields.length >= 5) {
-        input.checked = false;
-        showMessage("行情字段最多选择 5 项", "error");
-        return;
-      }
-      settings.quotes.fields.push(field);
-    } else if (!input.checked) {
-      settings.quotes.fields = settings.quotes.fields.filter((value) => value !== field);
-    }
-    return;
-  }
-
-  if (setting === "risk-mode") {
-    settings.risk.mode = target.value === "active" ? "active" : "shadow";
-    if (event.type === "change") render();
-    return;
-  }
-  if (setting === "risk-account-baseline") settings.risk.accountBaseline = nullableInputNumber(target.value);
-  if (setting === "risk-one-r") settings.risk.oneR = nullableInputNumber(target.value);
-  if (setting === "risk-max-position") settings.risk.maxPositionValue = nullableInputNumber(target.value);
-  if (setting === "risk-max-count") settings.risk.maxHoldingCount = nullableInputInteger(target.value);
-  if (setting === "risk-max-exposure") settings.risk.maxTotalExposurePercent = nullableInputNumber(target.value);
-  if (setting === "risk-daily-profit") settings.risk.portfolioDailyProfitThreshold = nullableInputNumber(target.value);
-  if (setting === "risk-daily-loss") settings.risk.portfolioDailyLossThreshold = nullableInputNumber(target.value);
-  if (setting === "risk-stop-warning") settings.risk.stopWarningPercent = Math.max(0.1, Number(target.value) || 0.1);
-  if (setting === "risk-hysteresis") settings.risk.hysteresisPercent = Math.max(0.01, Number(target.value) || 0.01);
-  if (setting === "risk-cooldown") settings.risk.cooldownMinutes = Math.max(0, Math.round(Number(target.value) || 0));
-  if (setting === "risk-once-per-day") settings.risk.oncePerDay = (target as HTMLInputElement).checked;
-  if (setting === "risk-trading-only") settings.risk.onlyDuringTrading = (target as HTMLInputElement).checked;
-  if (setting === "risk-widget") settings.risk.notifications.widget = (target as HTMLInputElement).checked;
-  if (setting === "risk-tray") settings.risk.notifications.tray = (target as HTMLInputElement).checked;
-  if (setting === "risk-windows") settings.risk.notifications.windows = (target as HTMLInputElement).checked;
-
-  if (setting === "quote-sort") settings.quotes.sort = target.value as QuoteSort;
-  if (setting === "news-mode") settings.news.mode = target.value as NewsMode;
-  if (setting === "news-max") {
-    settings.news.maxItems = Math.min(30, Math.max(1, Number(target.value) || 1));
-  }
-  if (setting === "theme") settings.appearance.theme = target.value as ThemeMode;
-  if (setting === "refresh-mode") {
-    settings.refreshPolicy = { mode: target.value as RefreshMode };
-  }
-  if (setting === "background-opacity") {
-    settings.appearance.backgroundOpacity = Number(target.value) / 100;
+  const updater = SETTINGS_FIELD_UPDATERS[setting];
+  if (!updater) return;
+  const result = updater(settings, {
+    element: target as unknown as FieldElement,
+    eventType: event.type
+  });
+  if (result.resetBossKeyRecording) recordingBossKey = false;
+  if (result.opacityLabel !== undefined) {
     const output = document.getElementById("opacity-value");
-    if (output) output.textContent = target.value + "%";
+    if (output) output.textContent = result.opacityLabel;
   }
+  if (result.message) {
+    // 该字段没有被写入（例如超过行情字段上限），把控件恢复成未勾选。
+    if (setting === "field") (target as HTMLInputElement).checked = false;
+    showMessage(result.message.text, result.message.kind);
+  }
+  if (result.rerender) render();
 }
 
 async function handleClick(event: Event): Promise<void> {
@@ -897,15 +776,19 @@ async function handleClick(event: Event): Promise<void> {
   const watchRow = button.closest<HTMLElement>(".watch-row");
   const index = Number(watchRow?.dataset.index);
   if (action === "move-up" && index > 0) {
-    [settings.watchlist[index - 1], settings.watchlist[index]] =
-      [settings.watchlist[index], settings.watchlist[index - 1]];
+    [settings.watchlist[index - 1], settings.watchlist[index]] = [
+      settings.watchlist[index],
+      settings.watchlist[index - 1]
+    ];
     normalizeOrder();
     render();
     return;
   }
   if (action === "move-down" && index < settings.watchlist.length - 1) {
-    [settings.watchlist[index + 1], settings.watchlist[index]] =
-      [settings.watchlist[index], settings.watchlist[index + 1]];
+    [settings.watchlist[index + 1], settings.watchlist[index]] = [
+      settings.watchlist[index],
+      settings.watchlist[index + 1]
+    ];
     normalizeOrder();
     render();
     return;
@@ -929,15 +812,19 @@ async function handleClick(event: Event): Promise<void> {
   const tabRow = button.closest<HTMLElement>(".tab-setting-row");
   const tabIndex = Number(tabRow?.dataset.tabIndex);
   if (action === "tab-up" && tabIndex > 0) {
-    [settings.tabs[tabIndex - 1], settings.tabs[tabIndex]] =
-      [settings.tabs[tabIndex], settings.tabs[tabIndex - 1]];
+    [settings.tabs[tabIndex - 1], settings.tabs[tabIndex]] = [
+      settings.tabs[tabIndex],
+      settings.tabs[tabIndex - 1]
+    ];
     normalizeOrder();
     render();
     return;
   }
   if (action === "tab-down" && tabIndex < settings.tabs.length - 1) {
-    [settings.tabs[tabIndex + 1], settings.tabs[tabIndex]] =
-      [settings.tabs[tabIndex], settings.tabs[tabIndex + 1]];
+    [settings.tabs[tabIndex + 1], settings.tabs[tabIndex]] = [
+      settings.tabs[tabIndex],
+      settings.tabs[tabIndex + 1]
+    ];
     normalizeOrder();
     render();
     return;
@@ -956,7 +843,10 @@ async function handleClick(event: Event): Promise<void> {
   const holdingIndex = Number(holdingRow?.dataset.holdingIndex);
   if (action === "clear-holding-rules" && Number.isInteger(holdingIndex)) {
     settings.holdings[holdingIndex].alertRules = emptyHoldingAlertRules();
-    showMessage(`已清空 ${securityFor(settings.holdings[holdingIndex].securityCode)?.name || settings.holdings[holdingIndex].securityCode} 的提醒规则，保存后生效`, "ok");
+    showMessage(
+      `已清空 ${securityFor(settings.holdings[holdingIndex].securityCode)?.name || settings.holdings[holdingIndex].securityCode} 的提醒规则，保存后生效`,
+      "ok"
+    );
     return;
   }
   if (action === "delete-holding") {
@@ -1005,8 +895,13 @@ async function handleClick(event: Event): Promise<void> {
 }
 
 function isSettingsPage(value: string | undefined): value is SettingsPage {
-  return value === "general" || value === "portfolio" || value === "quotes" ||
-    value === "news-ai" || value === "data";
+  return (
+    value === "general" ||
+    value === "portfolio" ||
+    value === "quotes" ||
+    value === "news-ai" ||
+    value === "data"
+  );
 }
 
 async function loadProfileFile(file: File): Promise<void> {
@@ -1046,9 +941,14 @@ async function previewPortableProfile(): Promise<void> {
   profileBusy = true;
   render();
   try {
-    profilePreview = await window.floatingStock.previewProfile({ text: profileText, mode: profileMode });
+    profilePreview = await window.floatingStock.previewProfile({
+      text: profileText,
+      mode: profileMode
+    });
     message = profilePreview.valid
-      ? profilePreview.hasChanges ? "配置包校验通过，请核对差异后确认导入" : "配置包与当前设置没有差异"
+      ? profilePreview.hasChanges
+        ? "配置包校验通过，请核对差异后确认导入"
+        : "配置包与当前设置没有差异"
       : "配置包存在错误，不会应用";
     messageKind = profilePreview.valid ? "ok" : "error";
   } catch (error) {
@@ -1063,11 +963,18 @@ async function previewPortableProfile(): Promise<void> {
 
 async function applyPortableProfile(): Promise<void> {
   if (!window.floatingStock || !profilePreview?.valid || !profilePreview.hasChanges) return;
-  if (profileMode === "replace" && !window.confirm("确认按预览内容替换明确提供的持仓/自选？导入前会自动备份。")) return;
+  if (
+    profileMode === "replace" &&
+    !window.confirm("确认按预览内容替换明确提供的持仓/自选？导入前会自动备份。")
+  )
+    return;
   profileBusy = true;
   render();
   try {
-    const result = await window.floatingStock.applyProfile({ text: profileText, mode: profileMode });
+    const result = await window.floatingStock.applyProfile({
+      text: profileText,
+      mode: profileMode
+    });
     settings = result.settings;
     settingsDirty = false;
     hasProfileBackup = result.backupCreated || hasProfileBackup;
@@ -1152,10 +1059,21 @@ function addStock(): void {
 
 function addHolding(): void {
   if (!settings) return;
-  const code = (document.getElementById("new-holding-code") as HTMLSelectElement | null)?.value ?? "";
-  const quantity = Number((document.getElementById("new-holding-quantity") as HTMLInputElement | null)?.value);
-  const costPrice = Number((document.getElementById("new-holding-cost") as HTMLInputElement | null)?.value);
-  if (!code || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(costPrice) || costPrice <= 0) {
+  const code =
+    (document.getElementById("new-holding-code") as HTMLSelectElement | null)?.value ?? "";
+  const quantity = Number(
+    (document.getElementById("new-holding-quantity") as HTMLInputElement | null)?.value
+  );
+  const costPrice = Number(
+    (document.getElementById("new-holding-cost") as HTMLInputElement | null)?.value
+  );
+  if (
+    !code ||
+    !Number.isFinite(quantity) ||
+    quantity <= 0 ||
+    !Number.isFinite(costPrice) ||
+    costPrice <= 0
+  ) {
     showMessage("请填写有效的持仓数量和成本价", "error");
     return;
   }
@@ -1188,7 +1106,8 @@ function emptyHoldingAlertRules(): HoldingAlertRules {
 
 function addTab(): void {
   if (!settings) return;
-  const type = (document.getElementById("new-tab-type") as HTMLSelectElement | null)?.value as TabType;
+  const type = (document.getElementById("new-tab-type") as HTMLSelectElement | null)
+    ?.value as TabType;
   const input = document.getElementById("new-tab-title") as HTMLInputElement | null;
   const title = input?.value.trim() || tabTypeLabels[type] || "自定义";
   settings.tabs.push({
@@ -1291,7 +1210,18 @@ function handleBossKeyCapture(event: KeyboardEvent): void {
     showMessage("已取消老板键录制", "ok");
     return;
   }
-  if (["ControlLeft", "ControlRight", "AltLeft", "AltRight", "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight"].includes(event.code)) {
+  if (
+    [
+      "ControlLeft",
+      "ControlRight",
+      "AltLeft",
+      "AltRight",
+      "ShiftLeft",
+      "ShiftRight",
+      "MetaLeft",
+      "MetaRight"
+    ].includes(event.code)
+  ) {
     return;
   }
 
@@ -1358,7 +1288,7 @@ function keyFromKeyboardEvent(event: KeyboardEvent): string {
     BracketRight: "]",
     Backslash: "\\",
     Semicolon: ";",
-    Quote: "\"",
+    Quote: '"',
     Comma: ",",
     Period: ".",
     Slash: "/",
@@ -1436,40 +1366,9 @@ function aiStatusLabel(): string {
   if (aiStatus.state === "success") return "连接正常";
   if (aiStatus.state === "error") return "需要处理";
   if (aiStatus.configured && !settings?.ai.enabled) return "已配置 · 未启用";
-  if (aiStatus.configured) return aiStatus.credentialSource === "secure"
-    ? "已安全配置"
-    : "环境变量";
+  if (aiStatus.configured)
+    return aiStatus.credentialSource === "secure" ? "已安全配置" : "环境变量";
   return "本地规则";
-}
-
-function nullableNumber(value: number | null): string {
-  return value == null ? "" : String(value);
-}
-
-function nullableInputNumber(value: string): number | null {
-  if (!value.trim()) return null;
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? number : null;
-}
-
-function nullableInputInteger(value: string): number | null {
-  const number = nullableInputNumber(value);
-  return number == null ? null : Math.max(1, Math.round(number));
-}
-function option(value: string, label: string, selected: string): string {
-  return `<option value="${escapeAttr(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function escapeAttr(value: string): string {
-  return escapeHtml(value).replaceAll("'", "&#39;");
 }
 
 render();
@@ -1477,14 +1376,14 @@ void Promise.all([
   window.floatingStock?.getSettings(),
   window.floatingStock?.getAiStatus(),
   window.floatingStock?.hasProfileBackup()
-]).then(([nextSettings, nextAiStatus, nextHasBackup]) => {
-  if (nextSettings) settings = nextSettings;
-  if (nextAiStatus) aiStatus = nextAiStatus;
-  hasProfileBackup = nextHasBackup === true;
-  render();
-}).catch((error) =>
-  showMessage(error instanceof Error ? error.message : String(error), "error")
-);
+])
+  .then(([nextSettings, nextAiStatus, nextHasBackup]) => {
+    if (nextSettings) settings = nextSettings;
+    if (nextAiStatus) aiStatus = nextAiStatus;
+    hasProfileBackup = nextHasBackup === true;
+    render();
+  })
+  .catch((error) => showMessage(error instanceof Error ? error.message : String(error), "error"));
 window.floatingStock?.onSettings((value) => {
   if (settingsDirty) return;
   settings = value;

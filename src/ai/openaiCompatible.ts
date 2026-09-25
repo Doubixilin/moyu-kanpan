@@ -46,7 +46,14 @@ export interface AiRequestOptions {
 }
 
 const EVENT_TYPES = new Set<NewsEventType>([
-  "earnings", "policy", "order", "management", "capital", "industry", "market", "other"
+  "earnings",
+  "policy",
+  "order",
+  "management",
+  "capital",
+  "industry",
+  "market",
+  "other"
 ]);
 const RELATIONS = new Set<NewsRelation>(["direct", "industry", "market", "uncertain"]);
 const DIRECTIONS = new Set<NewsDirection>(["positive", "negative", "neutral", "mixed"]);
@@ -62,13 +69,7 @@ export async function analyzeNewsBatch(
   if (items.length === 0) return [];
   if (items.length > 5) throw new Error("单次 AI 分析最多 5 条事件");
 
-  const payload = await requestJson(
-    ai,
-    analysisMessages(items),
-    2_400,
-    fetcher,
-    options
-  );
+  const payload = await requestJson(ai, analysisMessages(items), 2_400, fetcher, options);
   const structured = parseStructuredBatch(payload, new Set(items.map((item) => item.id)));
   const byId = new Map(structured.items.map((item) => [item.newsId, item]));
 
@@ -165,7 +166,7 @@ async function requestJson(
         });
         if (!response.ok) throw new AiHttpError(response.status);
 
-        const data = await response.json() as ChatCompletionResponse;
+        const data = (await response.json()) as ChatCompletionResponse;
         const choice = data.choices?.[0];
         if (choice?.finish_reason === "length") throw new Error("AI JSON 被截断");
         const content = choice?.message?.content?.trim();
@@ -187,22 +188,24 @@ async function requestJson(
 
 function analysisMessages(items: NewsItem[]): Array<{ role: "system" | "user"; content: string }> {
   const example = {
-    items: [{
-      newsId: "event-id",
-      useful: true,
-      eventType: "policy",
-      relatedCodes: ["000001"],
-      relation: "direct",
-      direction: "mixed",
-      horizon: "short",
-      importance: 70,
-      confidence: 60,
-      summary: "发生了什么",
-      mechanism: "通过收入、成本、供需、估值或风险偏好中的哪条路径影响",
-      evidence: ["只列输入材料中的事实"],
-      counterFactors: ["反向因素"],
-      missingInformation: ["仍缺少的信息"]
-    }]
+    items: [
+      {
+        newsId: "event-id",
+        useful: true,
+        eventType: "policy",
+        relatedCodes: ["000001"],
+        relation: "direct",
+        direction: "mixed",
+        horizon: "short",
+        importance: 70,
+        confidence: 60,
+        summary: "发生了什么",
+        mechanism: "通过收入、成本、供需、估值或风险偏好中的哪条路径影响",
+        evidence: ["只列输入材料中的事实"],
+        counterFactors: ["反向因素"],
+        missingInformation: ["仍缺少的信息"]
+      }
+    ]
   };
   const publicItems = items.map((item) => ({
     newsId: item.id,
@@ -231,7 +234,8 @@ function analysisMessages(items: NewsItem[]): Array<{ role: "system" | "user"; c
     },
     {
       role: "user",
-      content: "请批量分析以下公开事件并输出 json。不要推断用户持仓、成本或账户信息。\n" +
+      content:
+        "请批量分析以下公开事件并输出 json。不要推断用户持仓、成本或账户信息。\n" +
         JSON.stringify({ items: publicItems })
     }
   ];
@@ -261,8 +265,7 @@ function parseStructuredItem(value: unknown, expectedIds: Set<string>): Structur
     newsId,
     useful: value.useful,
     eventType,
-    relatedCodes: readStringArray(value.relatedCodes, 10, 6)
-      .filter((code) => /^\d{6}$/.test(code)),
+    relatedCodes: readStringArray(value.relatedCodes, 10, 6).filter((code) => /^\d{6}$/.test(code)),
     relation,
     direction,
     horizon,
@@ -344,33 +347,33 @@ function normalizeHorizon(value: unknown): NewsHorizon {
 
 function enumToken(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) throw new Error("AI JSON 枚举字段无效");
-  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 }
 
-function toNewsAnalysis(
-  item: NewsItem,
-  parsed: StructuredItem,
-  model: string
-): NewsAnalysis {
-  const sourceRelatedCodes = [...new Set(
-    (item.relatedCodes ?? []).filter((code) => /^\d{6}$/.test(code))
-  )];
+function toNewsAnalysis(item: NewsItem, parsed: StructuredItem, model: string): NewsAnalysis {
+  const sourceRelatedCodes = [
+    ...new Set((item.relatedCodes ?? []).filter((code) => /^\d{6}$/.test(code)))
+  ];
   const sourceCodeSet = new Set(sourceRelatedCodes);
   const inferredRelatedCodes = parsed.relatedCodes.filter((code) => !sourceCodeSet.has(code));
   const relatedCodes = [...new Set([...sourceRelatedCodes, ...inferredRelatedCodes])];
-  const relation = parsed.relation === "direct" && sourceRelatedCodes.length === 0
-    ? inferredRelatedCodes.length > 0
-      ? "industry"
-      : "uncertain"
-    : parsed.relation;
+  const relation =
+    parsed.relation === "direct" && sourceRelatedCodes.length === 0
+      ? inferredRelatedCodes.length > 0
+        ? "industry"
+        : "uncertain"
+      : parsed.relation;
   const inferredOnly = sourceRelatedCodes.length === 0 && inferredRelatedCodes.length > 0;
 
   const completeness = Math.min(
     100,
     (parsed.mechanism ? 30 : 0) +
-    Math.min(35, parsed.evidence.length * 15) +
-    (parsed.counterFactors.length ? 20 : 0) +
-    (parsed.missingInformation.length ? 15 : 0)
+      Math.min(35, parsed.evidence.length * 15) +
+      (parsed.counterFactors.length ? 20 : 0) +
+      (parsed.missingInformation.length ? 15 : 0)
   );
   const sourceScore = sourceReliability(item);
   const materialLimited = hasLimitedNewsMaterial(item);
@@ -378,17 +381,10 @@ function toNewsAnalysis(
   const confidence = Math.min(
     materialLimited || inferredOnly ? 55 : sourceScore >= 80 ? 90 : 75,
     Math.round(
-      parsed.confidence * 0.45 +
-      sourceScore * 0.2 +
-      completeness * 0.15 +
-      inputMaterialScore * 0.2
+      parsed.confidence * 0.45 + sourceScore * 0.2 + completeness * 0.15 + inputMaterialScore * 0.2
     )
   );
-  const priority = parsed.importance >= 70
-    ? "high"
-    : parsed.importance >= 40
-      ? "medium"
-      : "low";
+  const priority = parsed.importance >= 70 ? "high" : parsed.importance >= 40 ? "medium" : "low";
 
   return {
     newsId: item.id,
@@ -462,7 +458,8 @@ function readStringArray(value: unknown, maxItems: number, maxLength: number): s
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
     throw new Error("AI JSON 数组字段无效");
   }
-  return value
+  // 上面的 some() 已保证每个元素都是 string，但 TS 不会据此收窄数组元素类型。
+  return (value as string[])
     .map((item) => item.trim().slice(0, maxLength))
     .filter(Boolean)
     .slice(0, maxItems);

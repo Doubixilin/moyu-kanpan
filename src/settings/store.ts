@@ -1,4 +1,5 @@
-import { readFile, rename } from "node:fs/promises";
+import { readdir, readFile, rename, rm } from "node:fs/promises";
+import path from "node:path";
 import {
   assertSavableSettings,
   loadAppConfigFromObject,
@@ -27,6 +28,9 @@ export class SettingsStore {
 
   private writeQueue: Promise<void> = Promise.resolve();
   private recoveryMessage: string | null = null;
+  /** 读到的配置来自更新版本时记录其 schemaVersion；降级写入前备份一次原文件。 */
+  private newerSchemaVersion: number | null = null;
+  private newerSchemaBackupDone = false;
 
   async load(): Promise<AppConfig> {
     const user = await this.readSettingsFile();
@@ -44,11 +48,16 @@ export class SettingsStore {
     }
 
     const config = loadAppConfigFromObject(merged, this.env);
-    const sourceSchemaVersion = typeof user.schemaVersion === "number"
-      ? user.schemaVersion
-      : 0;
+    const sourceSchemaVersion = typeof user.schemaVersion === "number" ? user.schemaVersion : 0;
     if (sourceSchemaVersion < config.schemaVersion) {
       await this.writeConfig(config);
+    } else if (sourceSchemaVersion > config.schemaVersion) {
+      // 配置由更新版本写入：本版本不认识新字段，回写会静默丢掉它们。
+      // 先记下来，实际降级写入前会备份原文件。
+      this.newerSchemaVersion = sourceSchemaVersion;
+      this.recoveryMessage =
+        `配置由更新版本（schemaVersion ${sourceSchemaVersion}）写入；` +
+        `本版本只会保留自己认识的字段，覆盖前已备份原文件`;
     }
     return config;
   }
@@ -104,7 +113,28 @@ export class SettingsStore {
 
   async restoreImportBackup(): Promise<AppConfig> {
     const raw = await this.readRawFileStrict(this.importBackupPath);
-    return this.save(raw);
+    // 走规范化而不是 save()：备份可能由旧版本写入（例如含现已禁止的老板键），
+    // save() 会先跑 assertSavableSettings，从而拒绝一份本可自动修复的旧备份。
+    const config = loadAppConfigFromObject(mergeRawConfig(this.defaults, raw), this.env);
+    await this.writeConfig(config);
+    return config;
+  }
+
+  /**
+   * 隔离文件会随每次损坏累积（`<settings>.corrupt-<时间戳>`）。
+   * 只保留最近几次，既留足排查证据，又不会无限占磁盘。
+   */
+  private async pruneQuarantineFiles(keep = 3): Promise<void> {
+    try {
+      const directory = path.dirname(this.filePath);
+      const prefix = `${path.basename(this.filePath)}.corrupt-`;
+      const entries = (await readdir(directory)).filter((name) => name.startsWith(prefix)).sort();
+      for (const name of entries.slice(0, Math.max(0, entries.length - keep))) {
+        await rm(path.join(directory, name), { force: true });
+      }
+    } catch {
+      // 清理失败不应影响恢复流程。
+    }
   }
 
   async readImportBackup(): Promise<AppConfig> {
@@ -119,12 +149,27 @@ export class SettingsStore {
   }
 
   private async writeConfigNow(config: AppConfig): Promise<void> {
+    await this.backupNewerSchemaFileOnce();
     const settings = toUserSettings(config);
-    await atomicWriteText(
-      this.filePath,
-      JSON.stringify(settings, null, 2) + "\n",
-      { backupPath: this.recoveryBackupPath }
-    );
+    await atomicWriteText(this.filePath, JSON.stringify(settings, null, 2) + "\n", {
+      backupPath: this.recoveryBackupPath
+    });
+  }
+
+  /**
+   * 首次把"更新版本写入的配置"降级保存前，把原文件完整备份到
+   * `<settings>.v<source>.json`。这样即使本版本丢掉了不认识的字段，也能找回。
+   */
+  private async backupNewerSchemaFileOnce(): Promise<void> {
+    const version = this.newerSchemaVersion;
+    if (version == null || this.newerSchemaBackupDone) return;
+    this.newerSchemaBackupDone = true;
+    try {
+      const content = await readFile(this.filePath, "utf8");
+      await atomicWriteText(`${this.filePath}.v${version}.json`, content);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
 
   private async readPersonalSeed(): Promise<PersonalSeed | null> {
@@ -132,18 +177,17 @@ export class SettingsStore {
     const raw = await this.readRawFile(this.personalSeedPath);
     const version = typeof raw.version === "number" ? Math.max(0, Math.round(raw.version)) : 0;
     const settings = asRecord(raw.settings);
-    return version > 0 && Object.keys(settings).length > 0
-      ? { version, settings }
-      : null;
+    return version > 0 && Object.keys(settings).length > 0 ? { version, settings } : null;
   }
 
   private async readRawFile(filePath: string): Promise<RawConfig> {
     try {
       const content = await readFile(filePath, "utf8");
-      const parsed = JSON.parse(content);
-      return parsed && typeof parsed === "object" ? parsed as RawConfig : {};
+      const parsed: unknown = JSON.parse(content);
+      return parsed && typeof parsed === "object" ? (parsed as RawConfig) : {};
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError) return {};
+      if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError)
+        return {};
       throw error;
     }
   }
@@ -153,19 +197,24 @@ export class SettingsStore {
       return await this.readRawFileStrict(this.filePath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-      if (!(error instanceof SyntaxError) && !(error instanceof InvalidSettingsFileError)) throw error;
+      if (!(error instanceof SyntaxError) && !(error instanceof InvalidSettingsFileError))
+        throw error;
 
       const quarantinePath = `${this.filePath}.corrupt-${Date.now()}`;
       await rename(this.filePath, quarantinePath);
+      await this.pruneQuarantineFiles();
       try {
         const recovered = await this.readRawFileStrict(this.recoveryBackupPath);
         await copyFileAtomically(this.recoveryBackupPath, this.filePath);
         this.recoveryMessage = "设置文件损坏，已恢复上一次有效设置";
         return recovered;
       } catch (backupError) {
-        if ((backupError as NodeJS.ErrnoException).code !== "ENOENT" &&
+        if (
+          (backupError as NodeJS.ErrnoException).code !== "ENOENT" &&
           !(backupError instanceof SyntaxError) &&
-          !(backupError instanceof InvalidSettingsFileError)) throw backupError;
+          !(backupError instanceof InvalidSettingsFileError)
+        )
+          throw backupError;
         this.recoveryMessage = "设置文件损坏，已隔离并恢复默认设置";
         return {};
       }
@@ -191,32 +240,33 @@ function shouldApplyPersonalSeed(
   defaults: RawConfig,
   seedVersion: number
 ): boolean {
-  const appliedVersion = typeof user.personalSeedVersion === "number"
-    ? user.personalSeedVersion
-    : 0;
+  const appliedVersion =
+    typeof user.personalSeedVersion === "number" ? user.personalSeedVersion : 0;
   if (appliedVersion >= seedVersion) return false;
   if (Object.keys(user).length === 0) return true;
 
   const userCodes = watchlistCodes(user.watchlist);
   const defaultCodes = watchlistCodes(defaults.watchlist);
-  return userCodes.length > 0 &&
+  return (
+    userCodes.length > 0 &&
     userCodes.length === defaultCodes.length &&
-    userCodes.every((code, index) => code === defaultCodes[index]);
+    userCodes.every((code, index) => code === defaultCodes[index])
+  );
 }
 
 function watchlistCodes(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return value.map((entry) => {
-    if (typeof entry === "string") return entry.trim();
-    const row = asRecord(entry);
-    if (typeof row.securityCode === "string") return row.securityCode.trim();
-    if (typeof row.code === "string") return row.code.trim();
-    return "";
-  }).filter((code) => /^\d{6}$/.test(code));
+  return value
+    .map((entry) => {
+      if (typeof entry === "string") return entry.trim();
+      const row = asRecord(entry);
+      if (typeof row.securityCode === "string") return row.securityCode.trim();
+      if (typeof row.code === "string") return row.code.trim();
+      return "";
+    })
+    .filter((code) => /^\d{6}$/.test(code));
 }
 
 function asRecord(value: unknown): RawConfig {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as RawConfig
-    : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as RawConfig) : {};
 }

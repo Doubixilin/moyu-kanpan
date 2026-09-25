@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { AlertEvent } from "../domain/types.js";
 import type { AlertCandidate } from "../domain/risk.js";
+import { shanghaiDateKey } from "../domain/marketClock.js";
 import { atomicWriteText } from "./atomicFile.js";
 
 export interface AlertRuleState {
@@ -11,6 +12,10 @@ export interface AlertRuleState {
   evaluable: boolean;
   lastTriggeredAt: string | null;
   lastTriggeredDate: string | null;
+  /** 上次评估时的提醒模式；缺省表示旧版本持久化状态，首次评估会 rebase 一次。 */
+  mode?: "shadow" | "active";
+  /** 该规则上次缺席（候选中不再出现）的时间；用于清理长期不再使用的条目。 */
+  absentSince?: string;
 }
 
 export interface AlertEngineState {
@@ -19,6 +24,13 @@ export interface AlertEngineState {
   rules: Record<string, AlertRuleState>;
   recentEvents: AlertEvent[];
 }
+
+/**
+ * 缺席规则在状态表里的保留时长。
+ * 必须大于 cooldownMinutes 的上限（1440 分钟）与 oncePerDay 的窗口，
+ * 否则重新启用时会丢掉冷却/当日一次状态，从而重复提醒。
+ */
+const RULE_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 export interface AlertEvaluationContext {
   now: Date;
@@ -57,9 +69,11 @@ export class JsonAlertStateStore implements AlertStateStore {
 
   async write(state: AlertEngineState): Promise<void> {
     const snapshot = structuredClone(state);
-    this.writeQueue = this.writeQueue.catch(() => {}).then(async () => {
-      await atomicWriteText(this.filePath, JSON.stringify(snapshot));
-    });
+    this.writeQueue = this.writeQueue
+      .catch(() => {})
+      .then(async () => {
+        await atomicWriteText(this.filePath, JSON.stringify(snapshot));
+      });
     await this.writeQueue;
   }
 }
@@ -71,15 +85,15 @@ export class AlertEngine {
     this.state = initialState ? normalizeState(initialState) : emptyAlertEngineState();
   }
 
-  evaluate(
-    candidates: AlertCandidate[],
-    context: AlertEvaluationContext
-  ): AlertEvaluationResult {
+  evaluate(candidates: AlertCandidate[], context: AlertEvaluationContext): AlertEvaluationResult {
     const nowMs = context.now.getTime();
     const date = shanghaiDate(context.now);
     let stateChanged = false;
-    if (this.state.pausedThroughDate && this.state.pausedThroughDate !== date &&
-        context.tradingSession) {
+    if (
+      this.state.pausedThroughDate &&
+      this.state.pausedThroughDate !== date &&
+      context.tradingSession
+    ) {
       this.state.pausedThroughDate = null;
       stateChanged = true;
     }
@@ -88,15 +102,34 @@ export class AlertEngine {
     const activeRuleIds = new Set(candidates.map((candidate) => candidate.ruleId));
 
     for (const [ruleId, rule] of Object.entries(this.state.rules)) {
-      if (!activeRuleIds.has(ruleId) && rule.evaluable) {
+      if (activeRuleIds.has(ruleId)) {
+        if (rule.absentSince !== undefined) {
+          delete rule.absentSince;
+          stateChanged = true;
+        }
+        continue;
+      }
+      if (rule.evaluable) {
         rule.evaluable = false;
+        rule.absentSince = context.now.toISOString();
+        stateChanged = true;
+        continue;
+      }
+      const absentSince =
+        rule.absentSince === undefined ? Number.NaN : Date.parse(rule.absentSince);
+      if (!Number.isFinite(absentSince)) {
+        // 旧版本落盘的状态没有 absentSince：从现在开始计时。
+        rule.absentSince = context.now.toISOString();
+        stateChanged = true;
+      } else if (nowMs - absentSince > RULE_RETENTION_MS) {
+        delete this.state.rules[ruleId];
         stateChanged = true;
       }
     }
 
     for (const candidate of candidates) {
-      const canEvaluate = candidate.safe && !paused &&
-        (!context.onlyDuringTrading || context.tradingSession);
+      const canEvaluate =
+        candidate.safe && !paused && (!context.onlyDuringTrading || context.tradingSession);
       let rule = this.state.rules[candidate.ruleId];
       if (!rule) {
         rule = {
@@ -106,7 +139,8 @@ export class AlertEngine {
           armed: true,
           evaluable: canEvaluate,
           lastTriggeredAt: null,
-          lastTriggeredDate: null
+          lastTriggeredDate: null,
+          mode: context.mode
         };
         this.state.rules[candidate.ruleId] = rule;
         stateChanged = true;
@@ -117,6 +151,18 @@ export class AlertEngine {
         rule.lastValue = candidate.value;
         rule.threshold = candidate.threshold;
         rule.direction = candidate.direction;
+        rule.armed = true;
+        rule.evaluable = canEvaluate;
+        rule.mode = context.mode;
+        stateChanged = true;
+        continue;
+      }
+      // 模式切换（影子 → 正式，或反向）必须 rebase：否则影子模式触发时消耗掉的 armed
+      // 会让"切到正式模式后正处在越线状态"的规则永久静默，直到价格回抽再重新穿越。
+      // 与既有语义一致：只 rebase，不补发停用期间的旧穿越。
+      if (rule.mode !== context.mode) {
+        rule.mode = context.mode;
+        rule.lastValue = candidate.value;
         rule.armed = true;
         rule.evaluable = canEvaluate;
         stateChanged = true;
@@ -140,12 +186,15 @@ export class AlertEngine {
         rule.armed = true;
         stateChanged = true;
       }
-      const crossed = candidate.direction === "above"
-        ? rule.lastValue < candidate.threshold && candidate.value >= candidate.threshold
-        : rule.lastValue > candidate.threshold && candidate.value <= candidate.threshold;
+      // 上一笔用非严格比较：A 股最小变动价位 0.01，用户常设整数阈值，
+      // 若上一笔恰好等于阈值（lastValue === threshold），严格 `<` 会漏掉这次真实穿越。
+      const crossed =
+        candidate.direction === "above"
+          ? rule.lastValue <= candidate.threshold && candidate.value >= candidate.threshold
+          : rule.lastValue >= candidate.threshold && candidate.value <= candidate.threshold;
       const cooldownMs = Math.max(0, context.cooldownMinutes) * 60_000;
-      const outsideCooldown = !rule.lastTriggeredAt ||
-        nowMs - Date.parse(rule.lastTriggeredAt) >= cooldownMs;
+      const outsideCooldown =
+        !rule.lastTriggeredAt || nowMs - Date.parse(rule.lastTriggeredAt) >= cooldownMs;
       const dailyAllowed = !context.oncePerDay || rule.lastTriggeredDate !== date;
 
       if (rule.armed && crossed && outsideCooldown && dailyAllowed) {
@@ -180,8 +229,14 @@ export class AlertEngine {
     for (const rule of Object.values(this.state.rules)) rule.evaluable = false;
   }
 
-  isPaused(now = new Date()): boolean {
-    void now;
+  /**
+   * 是否处于"今日暂停"状态。
+   *
+   * 暂停的解除发生在 `evaluate()` 里（进入下一个交易时段时清空 `pausedThroughDate`），
+   * 因此这里不带 `now` 参数——此前签名上有个被 `void` 掉的 `now`，暗示存在按日过期的判断，
+   * 实际上并没有。跨日重启后要等首次 `evaluate()` 才会刷新该状态。
+   */
+  isPaused(): boolean {
     return this.state.pausedThroughDate != null;
   }
 
@@ -204,11 +259,7 @@ function retreated(candidate: AlertCandidate): boolean {
     : candidate.value >= candidate.threshold + candidate.hysteresis;
 }
 
-function toEvent(
-  candidate: AlertCandidate,
-  mode: "shadow" | "active",
-  now: Date
-): AlertEvent {
+function toEvent(candidate: AlertCandidate, mode: "shadow" | "active", now: Date): AlertEvent {
   const triggeredAt = now.toISOString();
   return {
     id: `${triggeredAt}:${candidate.ruleId}`,
@@ -226,22 +277,14 @@ function toEvent(
 }
 
 function shanghaiDate(value: Date): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(value);
-  const record = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${record.year}-${record.month}-${record.day}`;
+  // 复用 marketClock 的上海时钟，避免第三份时区实现漂移。
+  return shanghaiDateKey(value);
 }
 
 function normalizeState(value: AlertEngineState): AlertEngineState {
   return {
     version: 1,
-    pausedThroughDate: typeof value.pausedThroughDate === "string"
-      ? value.pausedThroughDate
-      : null,
+    pausedThroughDate: typeof value.pausedThroughDate === "string" ? value.pausedThroughDate : null,
     rules: value.rules && typeof value.rules === "object" ? structuredClone(value.rules) : {},
     recentEvents: Array.isArray(value.recentEvents)
       ? structuredClone(value.recentEvents).slice(0, 50)
@@ -252,8 +295,12 @@ function normalizeState(value: AlertEngineState): AlertEngineState {
 function isAlertEngineState(value: unknown): value is AlertEngineState {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
-  return record.version === 1 && Boolean(record.rules) &&
-    typeof record.rules === "object" && Array.isArray(record.recentEvents);
+  return (
+    record.version === 1 &&
+    Boolean(record.rules) &&
+    typeof record.rules === "object" &&
+    Array.isArray(record.recentEvents)
+  );
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

@@ -37,8 +37,14 @@ describe("alert crossing state machine", () => {
   it("does not fire on startup or repeat while a condition remains true", () => {
     const engine = new AlertEngine();
     assert.equal(engine.evaluate([candidate(9)], context("2026-07-10T01:30:00Z")).events.length, 0);
-    assert.equal(engine.evaluate([candidate(10.1)], context("2026-07-10T01:31:00Z")).events.length, 1);
-    assert.equal(engine.evaluate([candidate(10.2)], context("2026-07-10T01:32:00Z")).events.length, 0);
+    assert.equal(
+      engine.evaluate([candidate(10.1)], context("2026-07-10T01:31:00Z")).events.length,
+      1
+    );
+    assert.equal(
+      engine.evaluate([candidate(10.2)], context("2026-07-10T01:32:00Z")).events.length,
+      0
+    );
   });
 
   it("requires hysteresis retreat and cooldown before firing again", () => {
@@ -46,36 +52,60 @@ describe("alert crossing state machine", () => {
     engine.evaluate([candidate(9)], context("2026-07-10T01:30:00Z"));
     engine.evaluate([candidate(10.1)], context("2026-07-10T01:31:00Z"));
     engine.evaluate([candidate(9.4)], context("2026-07-10T01:32:00Z"));
-    assert.equal(engine.evaluate([candidate(10.1)], context("2026-07-10T01:35:00Z")).events.length, 0);
+    assert.equal(
+      engine.evaluate([candidate(10.1)], context("2026-07-10T01:35:00Z")).events.length,
+      0
+    );
     engine.evaluate([candidate(9.4)], context("2026-07-10T01:42:00Z"));
-    assert.equal(engine.evaluate([candidate(10.1)], context("2026-07-10T01:43:00Z")).events.length, 1);
+    assert.equal(
+      engine.evaluate([candidate(10.1)], context("2026-07-10T01:43:00Z")).events.length,
+      1
+    );
   });
 
   it("rebases after unsafe data instead of generating a catch-up alert", () => {
     const engine = new AlertEngine();
     engine.evaluate([candidate(9)], context("2026-07-10T01:30:00Z"));
     engine.evaluate([candidate(11, false)], context("2026-07-10T01:31:00Z"));
-    assert.equal(engine.evaluate([candidate(11)], context("2026-07-10T01:32:00Z")).events.length, 0);
+    assert.equal(
+      engine.evaluate([candidate(11)], context("2026-07-10T01:32:00Z")).events.length,
+      0
+    );
   });
 
   it("supports once-per-day and resumes on the next Shanghai date", () => {
     const engine = new AlertEngine();
     const once = { oncePerDay: true };
     engine.evaluate([candidate(9)], context("2026-07-10T01:30:00Z", once));
-    assert.equal(engine.evaluate([candidate(11)], context("2026-07-10T01:31:00Z", once)).events.length, 1);
+    assert.equal(
+      engine.evaluate([candidate(11)], context("2026-07-10T01:31:00Z", once)).events.length,
+      1
+    );
     engine.evaluate([candidate(9)], context("2026-07-10T02:00:00Z", once));
-    assert.equal(engine.evaluate([candidate(11)], context("2026-07-10T02:01:00Z", once)).events.length, 0);
+    assert.equal(
+      engine.evaluate([candidate(11)], context("2026-07-10T02:01:00Z", once)).events.length,
+      0
+    );
     engine.evaluate([candidate(9)], context("2026-07-11T01:30:00Z", once));
-    assert.equal(engine.evaluate([candidate(11)], context("2026-07-11T01:31:00Z", once)).events.length, 1);
+    assert.equal(
+      engine.evaluate([candidate(11)], context("2026-07-11T01:31:00Z", once)).events.length,
+      1
+    );
   });
 
   it("pauses for the current date and rebases after resume", () => {
     const engine = new AlertEngine();
     engine.evaluate([candidate(9)], context("2026-07-10T01:30:00Z"));
     engine.pauseForToday(new Date("2026-07-10T01:31:00Z"));
-    assert.equal(engine.evaluate([candidate(11)], context("2026-07-10T01:32:00Z")).events.length, 0);
+    assert.equal(
+      engine.evaluate([candidate(11)], context("2026-07-10T01:32:00Z")).events.length,
+      0
+    );
     engine.resume();
-    assert.equal(engine.evaluate([candidate(11)], context("2026-07-10T01:33:00Z")).events.length, 0);
+    assert.equal(
+      engine.evaluate([candidate(11)], context("2026-07-10T01:33:00Z")).events.length,
+      0
+    );
   });
 
   it("keeps pause active through non-trading days until the next trading session", () => {
@@ -96,7 +126,10 @@ describe("alert crossing state machine", () => {
     const engine = new AlertEngine();
     engine.evaluate([candidate(9)], context("2026-07-10T01:30:00Z"));
     engine.evaluate([], context("2026-07-10T01:31:00Z"));
-    assert.equal(engine.evaluate([candidate(11)], context("2026-07-10T01:32:00Z")).events.length, 0);
+    assert.equal(
+      engine.evaluate([candidate(11)], context("2026-07-10T01:32:00Z")).events.length,
+      0
+    );
   });
   it("persists alert state to a local JSON file", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "floating-alerts-"));
@@ -117,7 +150,90 @@ describe("alert crossing state machine", () => {
     first.evaluate([candidate(9)], context("2026-07-10T01:30:00Z"));
     first.evaluate([candidate(11)], context("2026-07-10T01:31:00Z"));
     const restored = new AlertEngine(first.exportState());
-    assert.equal(restored.evaluate([candidate(11.2)], context("2026-07-10T01:32:00Z")).events.length, 0);
+    assert.equal(
+      restored.evaluate([candidate(11.2)], context("2026-07-10T01:32:00Z")).events.length,
+      0
+    );
     assert.equal(restored.recentEvents().length, 1);
+  });
+
+  it("fires when a poll lands exactly on the threshold and then crosses", () => {
+    const engine = new AlertEngine();
+    // 首笔恰好等于阈值：只 arm 不告警
+    assert.equal(
+      engine.evaluate([candidate(10)], context("2026-07-10T01:30:00Z")).events.length,
+      0
+    );
+    // 从阈值继续上穿必须提醒（A 股 0.01 价位 + 整数阈值下的常见情形）
+    assert.equal(
+      engine.evaluate([candidate(10.05)], context("2026-07-10T01:31:00Z")).events.length,
+      1
+    );
+  });
+
+  it("fires a stop-loss crossing that starts exactly at the threshold", () => {
+    const engine = new AlertEngine();
+    const below = (value: number): AlertCandidate => ({
+      ...candidate(value),
+      ruleId: "holding:600519:stop-loss",
+      type: "stop_loss",
+      direction: "below",
+      threshold: 9,
+      hysteresis: 0.2
+    });
+    assert.equal(engine.evaluate([below(9)], context("2026-07-10T01:30:00Z")).events.length, 0);
+    assert.equal(engine.evaluate([below(8.8)], context("2026-07-10T01:31:00Z")).events.length, 1);
+  });
+
+  it("re-arms after switching from shadow to active so the next crossing is not swallowed", () => {
+    const engine = new AlertEngine();
+    engine.evaluate([candidate(9.5)], context("2026-07-10T01:30:00Z"));
+    // 影子模式触发一次，armed 被消耗
+    assert.equal(
+      engine.evaluate([candidate(10.5)], context("2026-07-10T01:31:00Z")).events.length,
+      1
+    );
+    assert.equal(
+      engine.evaluate([candidate(10.6)], context("2026-07-10T01:32:00Z")).events.length,
+      0
+    );
+
+    const active = { mode: "active" as const };
+    // 切到正式模式：rebase 后不补发，但 armed 恢复
+    assert.equal(
+      engine.evaluate([candidate(10.6)], context("2026-07-10T01:45:00Z", active)).events.length,
+      0
+    );
+    // 只要真实下探到阈值下方再穿越就应提醒，无需先完成整个回差
+    engine.evaluate([candidate(9.9)], context("2026-07-10T01:46:00Z", active));
+    assert.equal(
+      engine.evaluate([candidate(10.1)], context("2026-07-10T01:47:00Z", active)).events.length,
+      1
+    );
+  });
+
+  it("keeps cooldown state across a short absence but prunes long-absent rules", () => {
+    const engine = new AlertEngine();
+    engine.evaluate([candidate(9)], context("2026-07-10T01:30:00Z"));
+    assert.equal(
+      engine.evaluate([candidate(10.5)], context("2026-07-10T01:31:00Z")).events.length,
+      1
+    );
+
+    // 规则从候选中消失：条目必须保留（冷却与每日一次的状态不能丢）。
+    engine.evaluate([], context("2026-07-10T01:32:00Z"));
+    assert.equal(Object.keys(engine.exportState().rules).length, 1);
+
+    // 短暂缺席后重新出现：沿用旧条目，不重复提醒。
+    assert.equal(
+      engine.evaluate([candidate(10.5)], context("2026-07-10T01:35:00Z")).events.length,
+      0
+    );
+    assert.equal(Object.keys(engine.exportState().rules).length, 1);
+
+    // 缺席超过保留期后清理，避免状态表随持仓/规则编辑无限增长。
+    engine.evaluate([], context("2026-07-11T01:32:00Z"));
+    engine.evaluate([], context("2026-07-20T01:32:00Z"));
+    assert.equal(Object.keys(engine.exportState().rules).length, 0);
   });
 });

@@ -38,7 +38,7 @@ export class EncryptedApiKeyStore {
       return this.encryption.decryptString(Buffer.from(parsed.encrypted, "base64")).trim();
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
-      throw new Error("AI 凭据无法安全读取，请清除后重新配置");
+      throw new Error("AI 凭据无法安全读取，请清除后重新配置", { cause: error });
     }
   }
 

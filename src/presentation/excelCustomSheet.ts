@@ -39,5 +39,9 @@ export function isEditableExcelAddress(address: string): boolean {
 }
 
 export function sanitizeExcelCellText(value: string): string {
-  return value.replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 120);
+  return value
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .slice(0, 120);
 }

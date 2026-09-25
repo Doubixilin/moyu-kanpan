@@ -8,6 +8,14 @@ import type {
 } from "../domain/types.js";
 import { eastmoneySecid, tencentSymbol } from "../domain/market.js";
 import { fetchWithTimeout } from "./fetch.js";
+import {
+  asInteger,
+  asNumber,
+  asRecord,
+  asText,
+  isoFromUnixSeconds,
+  marketFromEastmoneyFlag
+} from "./parseUtils.js";
 
 export interface IntradayProviderResult {
   name: string;
@@ -29,10 +37,7 @@ export async function fetchEastmoneyMarketIndices(
   const url = new URL("https://push2.eastmoney.com/api/qt/ulist.np/get");
   url.searchParams.set("fltt", "2");
   url.searchParams.set("invt", "2");
-  url.searchParams.set(
-    "fields",
-    "f2,f3,f4,f6,f12,f13,f14,f104,f105,f106,f124"
-  );
+  url.searchParams.set("fields", "f2,f3,f4,f6,f12,f13,f14,f104,f105,f106,f124");
   url.searchParams.set("secids", instruments.map(eastmoneySecid).join(","));
   const response = await fetchWithTimeout(fetcher, url, marketHeaders());
   if (!response.ok) throw new Error(`Eastmoney market indices failed: ${response.status}`);
@@ -47,17 +52,14 @@ export async function fetchTencentMarketIndices(
   const response = await fetchWithTimeout(
     fetcher,
     `https://qt.gtimg.cn/q=${symbols}`,
-    { headers: { "User-Agent": "Mozilla/5.0" } }
+    tencentHeaders()
   );
   if (!response.ok) throw new Error(`Tencent market indices failed: ${response.status}`);
   const text = decode(Buffer.from(await response.arrayBuffer()), "gbk");
   return parseTencentMarketIndices(text, instruments);
 }
 
-export async function fetchEastmoneySectors(
-  limit = 5,
-  fetcher = fetch
-): Promise<MarketSector[]> {
+export async function fetchEastmoneySectors(limit = 5, fetcher = fetch): Promise<MarketSector[]> {
   const url = new URL("https://push2.eastmoney.com/api/qt/clist/get");
   url.searchParams.set("pn", "1");
   url.searchParams.set("pz", String(Math.max(limit * 3, 15)));
@@ -95,7 +97,7 @@ export async function fetchTencentIntraday(
 ): Promise<IntradayProviderResult> {
   const url = new URL("https://web.ifzq.gtimg.cn/appstock/app/minute/query");
   url.searchParams.set("code", tencentSymbol(instrument));
-  const response = await fetchWithTimeout(fetcher, url, marketHeaders());
+  const response = await fetchWithTimeout(fetcher, url, tencentHeaders());
   if (!response.ok) throw new Error(`Tencent intraday failed: ${response.status}`);
   return parseTencentIntraday(await response.json(), instrument);
 }
@@ -125,11 +127,8 @@ export async function fetchTencentDaily(
 ): Promise<DailyProviderResult> {
   const adjustment = instrument.kind === "stock" ? "qfq" : "";
   const url = new URL("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get");
-  url.searchParams.set(
-    "param",
-    `${tencentSymbol(instrument)},day,,,${limit},${adjustment}`
-  );
-  const response = await fetchWithTimeout(fetcher, url, marketHeaders());
+  url.searchParams.set("param", `${tencentSymbol(instrument)},day,,,${limit},${adjustment}`);
+  const response = await fetchWithTimeout(fetcher, url, tencentHeaders());
   if (!response.ok) throw new Error(`Tencent daily failed: ${response.status}`);
   return parseTencentDaily(await response.json(), instrument);
 }
@@ -140,15 +139,17 @@ export function parseEastmoneyMarketIndices(
 ): MarketIndexQuote[] {
   const rows = asRecord(asRecord(payload).data).diff;
   if (!Array.isArray(rows)) return [];
-  const byKey = new Map(instruments.map((instrument) => [
-    `${instrument.market}:${instrument.code}`,
-    instrument
-  ]));
+  const byKey = new Map(
+    instruments.map((instrument) => [`${instrument.market}:${instrument.code}`, instrument])
+  );
+  // f13 无法区分深市与北交所（实测北交所也是 0），因此回退到按代码查找，
+  // 否则北交所标的会因为 key 变成 "SZ:..." 而查不到、被静默丢弃。
+  const byCode = new Map(instruments.map((instrument) => [instrument.code, instrument]));
   const result: MarketIndexQuote[] = [];
   for (const value of rows) {
     const row = asRecord(value);
-    const market = Number(row.f13) === 1 ? "SH" : Number(row.f13) === 0 ? "SZ" : "BJ";
-    const instrument = byKey.get(`${market}:${asText(row.f12)}`);
+    const code = asText(row.f12);
+    const instrument = byKey.get(`${marketFromEastmoneyFlag(row.f13)}:${code}`) ?? byCode.get(code);
     if (!instrument) continue;
     result.push({
       instrument: { ...instrument, name: asText(row.f14) || instrument.name },
@@ -170,7 +171,9 @@ export function parseTencentMarketIndices(
   text: string,
   instruments: MarketInstrument[]
 ): MarketIndexQuote[] {
-  const bySymbol = new Map(instruments.map((instrument) => [tencentSymbol(instrument), instrument]));
+  const bySymbol = new Map(
+    instruments.map((instrument) => [tencentSymbol(instrument), instrument])
+  );
   const result: MarketIndexQuote[] = [];
   for (const match of text.matchAll(/v_([a-z]{2}\d{6})="([^"]*)";/gi)) {
     const symbol = match[1]!.toLowerCase();
@@ -220,6 +223,8 @@ export function parseEastmoneySectors(payload: unknown, limit = 5): MarketSector
 export function parseEastmoneyIntraday(payload: unknown): IntradayProviderResult {
   const data = asRecord(asRecord(payload).data);
   const rows = Array.isArray(data.trends) ? data.trends : [];
+  // 东财给的是"每分钟"成交量/额（实测全天求和等于当日总量），必须累加成当日累计，
+  // 否则图表成交量会随主备源切换而改变口径（腾讯那边本身就是累计值）。
   let cumulativeVolume = 0;
   let cumulativeAmount = 0;
   const items: IntradayPoint[] = [];
@@ -266,6 +271,7 @@ export function parseTencentIntraday(
       time,
       price,
       average: null,
+      // 腾讯的 volume/amount 已是当日累计值，与东财累加后的口径一致（实测确认）。
       volume: asNumber(parts[2]),
       amount: asNumber(parts[3])
     });
@@ -301,7 +307,9 @@ export function parseTencentDaily(
   const symbolData = asRecord(asRecord(asRecord(payload).data)[tencentSymbol(instrument)]);
   const rawRows = Array.isArray(symbolData.qfqday)
     ? symbolData.qfqday
-    : Array.isArray(symbolData.day) ? symbolData.day : [];
+    : Array.isArray(symbolData.day)
+      ? symbolData.day
+      : [];
   const items = rawRows.flatMap((value): DailyCandle[] => {
     if (!Array.isArray(value)) return [];
     return parseDailyParts(value.map(String));
@@ -322,23 +330,35 @@ function parseDailyParts(parts: string[]): DailyCandle[] {
   const high = asNumber(parts[3]);
   const low = asNumber(parts[4]);
   const volume = asNumber(parts[5]);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || open == null || close == null ||
-      high == null || low == null || volume == null || open <= 0 || close <= 0 ||
-      high < Math.max(open, close, low) || low > Math.min(open, close, high) || volume < 0) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    open == null ||
+    close == null ||
+    high == null ||
+    low == null ||
+    volume == null ||
+    open <= 0 ||
+    close <= 0 ||
+    high < Math.max(open, close, low) ||
+    low > Math.min(open, close, high) ||
+    volume < 0
+  ) {
     return [];
   }
-  return [{
-    date,
-    open,
-    close,
-    high,
-    low,
-    volume,
-    amount: asNumber(parts[6]),
-    bollMid: null,
-    bollUpper: null,
-    bollLower: null
-  }];
+  return [
+    {
+      date,
+      open,
+      close,
+      high,
+      low,
+      volume,
+      amount: asNumber(parts[6]),
+      bollMid: null,
+      bollUpper: null,
+      bollLower: null
+    }
+  ];
 }
 
 function marketHeaders(): RequestInit {
@@ -350,13 +370,16 @@ function marketHeaders(): RequestInit {
   };
 }
 
-function normalizeSectorName(value: string): string {
-  return value.replace(/[ⅠⅡⅢ]+$/u, "").trim();
+/**
+ * 腾讯行情（qt.gtimg.cn / web.ifzq.gtimg.cn）只用 User-Agent。
+ * 此前分时与日 K 复用了 marketHeaders()，把东财的 Referer 发给了腾讯域名。
+ */
+function tencentHeaders(): RequestInit {
+  return { headers: { "User-Agent": "Mozilla/5.0" } };
 }
 
-function isoFromUnixSeconds(value: unknown): string | null {
-  const seconds = asNumber(value);
-  return seconds != null && seconds > 0 ? new Date(seconds * 1000).toISOString() : null;
+function normalizeSectorName(value: string): string {
+  return value.replace(/[ⅠⅡⅢ]+$/u, "").trim();
 }
 
 function isoFromTencentTimestamp(value: unknown): string | null {
@@ -380,25 +403,4 @@ function isoFromTencentMinute(date: string, time: unknown): string | null {
   return new Date(
     `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${hhmm.slice(0, 2)}:${hhmm.slice(2)}:00+08:00`
   ).toISOString();
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function asText(value: unknown): string {
-  return typeof value === "string" ? value : value == null ? "" : String(value);
-}
-
-function asNumber(value: unknown): number | null {
-  if (value === "-" || value === "" || value == null) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function asInteger(value: unknown): number | null {
-  const number = asNumber(value);
-  return number == null ? null : Math.round(number);
 }

@@ -13,6 +13,9 @@ await compileTypeScript("src/settingsRenderer.ts", "settings.js");
 await compileTypeScript("src/quickRenderer.ts", "quick.js");
 await compileTypeScript("src/excelRenderer.ts", "excel.js");
 await compileTypeScript("src/workRenderer.ts", "workweb.js");
+await compileTypeScript("src/presentation/format.ts", "presentation/format.js");
+await compileTypeScript("src/settings/fields.ts", "settings/fields.js");
+await compileTypeScript("src/settings/views.ts", "settings/views.js");
 await compileTypeScript("src/presentation/excelWorkbook.ts", "presentation/excelWorkbook.js");
 await compileTypeScript("src/presentation/excelCustomSheet.ts", "presentation/excelCustomSheet.js");
 await compileTypeScript("src/presentation/excelTrend.ts", "presentation/excelTrend.js");
@@ -78,7 +81,9 @@ async function compileTypeScript(sourcePath, outputName) {
   );
   if (errors.length > 0) {
     throw new Error(
-      errors.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")).join("\n")
+      errors
+        .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))
+        .join("\n")
     );
   }
 

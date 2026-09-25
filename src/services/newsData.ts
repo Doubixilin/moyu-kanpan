@@ -2,8 +2,17 @@ import type { NewsAnalysis, NewsItem } from "../domain/types.js";
 import { fetchCninfoAnnouncements } from "../providers/cninfo.js";
 import { fetchCsrcPolicyNews } from "../providers/csrc.js";
 import { fetchEastmoneyFastNews } from "../providers/eastmoneyNews.js";
-import { fetchSseAnnouncements, fetchSzseAnnouncements } from "../providers/exchangeAnnouncements.js";
+import {
+  fetchSseAnnouncements,
+  fetchSzseAnnouncements
+} from "../providers/exchangeAnnouncements.js";
 import { SqliteNewsEventStore } from "./newsEvents.js";
+
+/**
+ * 交易所公告抓取的总时间预算。
+ * 超过后不再发起新的标的请求（已发出的仍会完成），把整轮刷新限制在一个轮询周期内。
+ */
+const OFFICIAL_FETCH_BUDGET_MS = 30_000;
 
 export interface NewsProviderSet {
   media: () => Promise<NewsItem[]>;
@@ -35,11 +44,14 @@ export class NewsDataCoordinator {
     private readonly intervals = { officialMs: 5 * 60_000, policyMs: 15 * 60_000 }
   ) {}
 
-  async refresh(codes: string[], options: {
-    now?: Date;
-    limit?: number;
-    analysisNamespace?: string;
-  } = {}): Promise<NewsRefreshResult> {
+  async refresh(
+    codes: string[],
+    options: {
+      now?: Date;
+      limit?: number;
+      analysisNamespace?: string;
+    } = {}
+  ): Promise<NewsRefreshResult> {
     const now = options.now ?? new Date();
     const errors: string[] = [];
     const sources = new Set<string>();
@@ -50,11 +62,18 @@ export class NewsDataCoordinator {
     if (now.getTime() - this.lastOfficialAttemptAt >= this.intervals.officialMs) {
       this.lastOfficialAttemptAt = now.getTime();
       await this.fetchOfficial(
-        [...new Set(codes)].slice(0, 50), documents, errors, sources, attemptedSources, now
+        [...new Set(codes)].slice(0, 50),
+        documents,
+        errors,
+        sources,
+        attemptedSources,
+        now
       );
     }
-    if (now.getTime() - this.lastPolicyAttemptAt >= this.intervals.policyMs &&
-        this.store.sourceDue("csrc", now)) {
+    if (
+      now.getTime() - this.lastPolicyAttemptAt >= this.intervals.policyMs &&
+      this.store.sourceDue("csrc", now)
+    ) {
       this.lastPolicyAttemptAt = now.getTime();
       await this.fetchPolicy(documents, errors, sources, attemptedSources, now);
     }
@@ -83,8 +102,11 @@ export class NewsDataCoordinator {
   }
 
   private async fetchMedia(
-    documents: NewsItem[], errors: string[], sources: Set<string>,
-    attempted: Set<string>, now: Date
+    documents: NewsItem[],
+    errors: string[],
+    sources: Set<string>,
+    attempted: Set<string>,
+    now: Date
   ): Promise<void> {
     if (!this.store.sourceDue("eastmoney", now)) return;
     attempted.add("eastmoney");
@@ -101,6 +123,9 @@ export class NewsDataCoordinator {
       attempted.add("media-fallback");
       try {
         const items = await this.providers.fallbackMedia();
+        // 这里的 "empty response" 是独立判定，并非由上面 eastmoney 的失败引起，
+        // 因此不挂 cause（挂了会把无关错误伪装成因果链）。
+        // eslint-disable-next-line preserve-caught-error
         if (!items.length) throw new Error("empty response");
         documents.push(...items);
         sources.add("media-fallback");
@@ -113,13 +138,25 @@ export class NewsDataCoordinator {
   }
 
   private async fetchOfficial(
-    codes: string[], documents: NewsItem[], errors: string[], sources: Set<string>,
-    attempted: Set<string>, now: Date
+    codes: string[],
+    documents: NewsItem[],
+    errors: string[],
+    sources: Set<string>,
+    attempted: Set<string>,
+    now: Date
   ): Promise<void> {
     if (!codes.length || !this.store.sourceDue("cninfo", now)) return;
     attempted.add("cninfo");
     let cninfoSuccesses = 0;
+    let skipped = 0;
+    // 最多 50 个标的、4 路并发、单请求 10s 超时：没有总预算时最坏会突发约 130s，
+    // 而新闻刷新是单飞的，这期间其它窗口只能拿到同一个 in-flight promise。
+    const deadline = Date.now() + OFFICIAL_FETCH_BUDGET_MS;
     const results = await mapLimit(codes, 4, async (code) => {
+      if (Date.now() >= deadline) {
+        skipped += 1;
+        return [];
+      }
       try {
         const items = await this.providers.cninfo(code, now);
         cninfoSuccesses += 1;
@@ -144,6 +181,9 @@ export class NewsDataCoordinator {
       }
     });
     documents.push(...results.flat());
+    if (skipped > 0) {
+      errors.push(`cninfo:抓取预算用尽，本轮跳过 ${skipped} 个标的`);
+    }
     if (cninfoSuccesses > 0) {
       sources.add("cninfo");
       this.store.recordSourceSuccess("cninfo", now);
@@ -153,8 +193,11 @@ export class NewsDataCoordinator {
   }
 
   private async fetchPolicy(
-    documents: NewsItem[], errors: string[], sources: Set<string>,
-    attempted: Set<string>, now: Date
+    documents: NewsItem[],
+    errors: string[],
+    sources: Set<string>,
+    attempted: Set<string>,
+    now: Date
   ): Promise<void> {
     attempted.add("csrc");
     try {
@@ -180,7 +223,11 @@ function defaultProviders(): NewsProviderSet {
   };
 }
 
-async function mapLimit<T, R>(items: T[], limit: number, run: (item: T) => Promise<R>): Promise<R[]> {
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<R>
+): Promise<R[]> {
   const result = new Array<R>(items.length);
   let cursor = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {

@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  isSecureApiBaseUrl,
-  isTrustedRendererUrl,
-  resolveDevServerUrl
-} from "../runtimeSecurity";
+import { isSecureApiBaseUrl, isTrustedRendererUrl, resolveDevServerUrl } from "../runtimeSecurity";
 
 describe("runtime renderer security", () => {
   it("never uses a development server in a packaged application", () => {
@@ -23,16 +19,14 @@ describe("runtime renderer security", () => {
     assert.equal(isTrustedRendererUrl("file:///app/dist/index.html", files, null), true);
     assert.equal(isTrustedRendererUrl("file:///tmp/evil.html", files, null), false);
     assert.equal(isTrustedRendererUrl("https://example.com", files, null), false);
-    assert.equal(isTrustedRendererUrl(
-      "http://127.0.0.1:5173/settings.html",
-      files,
-      "http://127.0.0.1:5173/"
-    ), true);
-    assert.equal(isTrustedRendererUrl(
-      "http://example.com/settings.html",
-      files,
-      "http://127.0.0.1:5173/"
-    ), false);
+    assert.equal(
+      isTrustedRendererUrl("http://127.0.0.1:5173/settings.html", files, "http://127.0.0.1:5173/"),
+      true
+    );
+    assert.equal(
+      isTrustedRendererUrl("http://example.com/settings.html", files, "http://127.0.0.1:5173/"),
+      false
+    );
   });
 
   it("requires HTTPS for remote API credentials but permits local development", () => {

@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-electron/
 release/
+coverage/
 .env
 .DS_Store
 npm-debug.log*

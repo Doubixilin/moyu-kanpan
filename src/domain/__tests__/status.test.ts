@@ -31,24 +31,28 @@ describe("feed status", () => {
 
 describe("news source status", () => {
   it("keeps a one-off timeout out of the visible error stream", () => {
-    const summary = summarizeNewsSourceHealth([{
-      source: "eastmoney",
-      lastSuccessAt: null,
-      lastError: "Request timed out after 10000ms",
-      consecutiveFailures: 1,
-      nextRetryAt: null
-    }]);
+    const summary = summarizeNewsSourceHealth([
+      {
+        source: "eastmoney",
+        lastSuccessAt: null,
+        lastError: "Request timed out after 10000ms",
+        consecutiveFailures: 1,
+        nextRetryAt: null
+      }
+    ]);
     assert.equal(summary, null);
   });
 
   it("shows a brief source label after repeated failures without exposing raw errors", () => {
-    const summary = summarizeNewsSourceHealth([{
-      source: "eastmoney",
-      lastSuccessAt: null,
-      lastError: "Request timed out after 10000ms",
-      consecutiveFailures: 3,
-      nextRetryAt: null
-    }]);
+    const summary = summarizeNewsSourceHealth([
+      {
+        source: "eastmoney",
+        lastSuccessAt: null,
+        lastError: "Request timed out after 10000ms",
+        consecutiveFailures: 3,
+        nextRetryAt: null
+      }
+    ]);
     assert.equal(summary, "东财快讯连续失败，正在使用其他来源和历史事件");
     assert.doesNotMatch(summary ?? "", /10000ms|Request timed out/);
   });

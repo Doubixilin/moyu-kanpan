@@ -25,10 +25,7 @@ export interface FloatingStockApi {
   getAiStatus: () => Promise<AiRuntimeStatus>;
   setAiApiKey: (apiKey: string) => Promise<AiRuntimeStatus>;
   clearAiApiKey: () => Promise<AiRuntimeStatus>;
-  testAiConnection: (request: {
-    ai: AiSettings;
-    apiKey?: string;
-  }) => Promise<AiRuntimeStatus>;
+  testAiConnection: (request: { ai: AiSettings; apiKey?: string }) => Promise<AiRuntimeStatus>;
   onAiStatus: (callback: (status: AiRuntimeStatus) => void) => () => void;
   onSettings: (callback: (settings: UserSettings) => void) => () => void;
   openSettings: () => Promise<void>;

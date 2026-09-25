@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-electron/
+release/
+coverage/
+package-lock.json
+
+# 文档以中文排版为主，表格与换行由人工控制，不交给 prettier。
+docs/
+README.md
+LICENSE
+
+# 样式表留待 CSS token 层那次改动一起整理（见审计报告 §4-10），
+# 避免同一个文件在两次改动里各重排一遍。
+*.css

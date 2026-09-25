@@ -9,7 +9,8 @@ import { openRecoveringNewsEventStore, SqliteNewsEventStore } from "../newsEvent
 const directories: string[] = [];
 
 afterEach(() => {
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
 });
 
 function store(): SqliteNewsEventStore {
@@ -38,15 +39,17 @@ describe("sqlite news event store", () => {
   it("deduplicates exact documents and clusters a media retelling", () => {
     const database = store();
     database.ingest([document(), document()]);
-    database.ingest([document({
-      id: "media-1",
-      title: "平安银行：为子公司提供担保最新进展",
-      url: "https://example.com/media",
-      source: "eastmoney",
-      sourceTier: "media",
-      documentType: "fast_news",
-      publishedAt: "2026-07-09T00:30:00.000Z"
-    })]);
+    database.ingest([
+      document({
+        id: "media-1",
+        title: "平安银行：为子公司提供担保最新进展",
+        url: "https://example.com/media",
+        source: "eastmoney",
+        sourceTier: "media",
+        documentType: "fast_news",
+        publishedAt: "2026-07-09T00:30:00.000Z"
+      })
+    ]);
     const events = database.listEvents();
     assert.equal(events.length, 1);
     assert.equal(events[0]?.source, "szse");
@@ -70,39 +73,81 @@ describe("sqlite news event store", () => {
 
   it("persists successful analysis and leaves failures retryable", () => {
     const database = store();
-    const [event] = database.ingest([document()]);
+    database.ingest([document()]);
+    const event = database.listEvents({ limit: 1 })[0]!;
     const analysis = {
-      newsId: event!.id, priority: "high", status: "analyzed", useful: true,
-      eventType: "capital", relatedCodes: ["000001"], sourceRelatedCodes: ["000001"],
-      inferredRelatedCodes: [], relation: "direct", direction: "neutral", horizon: "short",
-      importance: 75, confidence: 80, modelConfidence: 80, materialLimited: true,
-      summary: "担保事项更新", mechanism: "或影响或有负债", evidence: ["公司公告"],
-      counterFactors: [], missingInformation: [], matchedKeywords: [],
-      analyzedAt: "2026-07-11T00:00:00.000Z", provider: "ai", model: "test"
+      newsId: event.id,
+      priority: "high",
+      status: "analyzed",
+      useful: true,
+      eventType: "capital",
+      relatedCodes: ["000001"],
+      sourceRelatedCodes: ["000001"],
+      inferredRelatedCodes: [],
+      relation: "direct",
+      direction: "neutral",
+      horizon: "short",
+      importance: 75,
+      confidence: 80,
+      modelConfidence: 80,
+      materialLimited: true,
+      summary: "担保事项更新",
+      mechanism: "或影响或有负债",
+      evidence: ["公司公告"],
+      counterFactors: [],
+      missingInformation: [],
+      matchedKeywords: [],
+      analyzedAt: "2026-07-11T00:00:00.000Z",
+      provider: "ai",
+      model: "test"
     } satisfies NewsAnalysis;
-    database.saveAnalysis(event!.id, analysis);
+    database.saveAnalysis(event.id, analysis);
     assert.equal(database.listEvents()[0]?.analysis?.summary, "担保事项更新");
-    database.markAnalysisFailure(event!.id, "later failure");
+    database.markAnalysisFailure(event.id, "later failure");
     assert.equal(database.listEvents()[0]?.analysis?.summary, "担保事项更新");
     database.close();
   });
 
   it("does not reuse stored AI analysis across model namespaces", () => {
     const database = store();
-    const [event] = database.ingest([document()]);
+    database.ingest([document()]);
+    const event = database.listEvents({ limit: 1 })[0]!;
     const analysis = {
-      newsId: event!.id, priority: "high", status: "analyzed", useful: true,
-      eventType: "capital", relatedCodes: ["000001"], sourceRelatedCodes: ["000001"],
-      inferredRelatedCodes: [], relation: "direct", direction: "neutral", horizon: "short",
-      importance: 75, confidence: 80, modelConfidence: 80, materialLimited: true,
-      summary: "旧模型分析", mechanism: "测试", evidence: ["公告"], counterFactors: [],
-      missingInformation: [], matchedKeywords: [], analyzedAt: "2026-07-11T00:00:00.000Z",
-      provider: "ai", model: "old"
+      newsId: event.id,
+      priority: "high",
+      status: "analyzed",
+      useful: true,
+      eventType: "capital",
+      relatedCodes: ["000001"],
+      sourceRelatedCodes: ["000001"],
+      inferredRelatedCodes: [],
+      relation: "direct",
+      direction: "neutral",
+      horizon: "short",
+      importance: 75,
+      confidence: 80,
+      modelConfidence: 80,
+      materialLimited: true,
+      summary: "旧模型分析",
+      mechanism: "测试",
+      evidence: ["公告"],
+      counterFactors: [],
+      missingInformation: [],
+      matchedKeywords: [],
+      analyzedAt: "2026-07-11T00:00:00.000Z",
+      provider: "ai",
+      model: "old"
     } satisfies NewsAnalysis;
-    database.saveAnalysis(event!.id, analysis, "provider:old");
-    assert.equal(database.listEvents({ analysisNamespace: "provider:old" })[0]?.analysis?.summary, "旧模型分析");
-    assert.equal(database.listEvents({ analysisNamespace: "provider:new" })[0]?.analysis, undefined);
-    assert.equal(database.analysisDue(event!.id, new Date(), "provider:new"), true);
+    database.saveAnalysis(event.id, analysis, "provider:old");
+    assert.equal(
+      database.listEvents({ analysisNamespace: "provider:old" })[0]?.analysis?.summary,
+      "旧模型分析"
+    );
+    assert.equal(
+      database.listEvents({ analysisNamespace: "provider:new" })[0]?.analysis,
+      undefined
+    );
+    assert.equal(database.analysisDue(event.id, new Date(), "provider:new"), true);
     database.close();
   });
 
@@ -120,16 +165,60 @@ describe("sqlite news event store", () => {
 
   it("prunes event history older than the local retention window", () => {
     const database = store();
-    database.ingest([document({
-      id: "old", url: "https://example.com/old.pdf",
-      publishedAt: "2026-05-01T00:00:00.000Z", title: "旧公告"
-    })]);
-    database.ingest([document({
-      id: "new", url: "https://example.com/new.pdf",
-      publishedAt: "2026-07-10T00:00:00.000Z", title: "新公告"
-    })]);
+    database.ingest([
+      document({
+        id: "old",
+        url: "https://example.com/old.pdf",
+        publishedAt: "2026-05-01T00:00:00.000Z",
+        title: "旧公告"
+      })
+    ]);
+    database.ingest([
+      document({
+        id: "new",
+        url: "https://example.com/new.pdf",
+        publishedAt: "2026-07-10T00:00:00.000Z",
+        title: "新公告"
+      })
+    ]);
     database.pruneBefore(new Date("2026-06-11T00:00:00.000Z"));
-    assert.deepEqual(database.listEvents().map((item) => item.title), ["新公告"]);
+    assert.deepEqual(
+      database.listEvents().map((item) => item.title),
+      ["新公告"]
+    );
+    database.close();
+  });
+
+  it("finds relevant events that sit beyond the raw LIMIT window", () => {
+    const database = store();
+    // 一条较早但相关的公告，随后是 5 条更新但无关的公告。
+    database.ingest([
+      document({
+        id: "relevant",
+        url: "https://example.com/relevant.pdf",
+        publishedAt: "2026-07-01T00:00:00.000Z",
+        title: "相关公告",
+        relatedCodes: ["600519"]
+      })
+    ]);
+    for (let index = 0; index < 5; index += 1) {
+      database.ingest([
+        document({
+          id: `other-${index}`,
+          url: `https://example.com/other-${index}.pdf`,
+          publishedAt: `2026-07-1${index + 1}T00:00:00.000Z`,
+          title: `无关公告${index}`,
+          relatedCodes: ["000001"]
+        })
+      ]);
+    }
+
+    // limit=1：若 SQL 先 LIMIT 再过滤，只会拿到最新那条无关公告。
+    const found = database.listEvents({ limit: 1, relatedCodes: new Set(["600519"]) });
+    assert.deepEqual(
+      found.map((item) => item.title),
+      ["相关公告"]
+    );
     database.close();
   });
 });

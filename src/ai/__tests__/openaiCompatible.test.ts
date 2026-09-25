@@ -2,11 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AppConfig } from "../../config";
 import type { NewsItem } from "../../domain/types";
-import {
-  analyzeNewsBatch,
-  safeAiError,
-  testAiConnection
-} from "../openaiCompatible";
+import { analyzeNewsBatch, safeAiError, testAiConnection } from "../openaiCompatible";
 
 const ai: AppConfig["ai"] = {
   enabled: true,
@@ -28,32 +24,39 @@ const item: NewsItem = {
 };
 
 function completion(content: unknown, finishReason: string | null = "stop"): Response {
-  return new Response(JSON.stringify({
-    choices: [{
-      finish_reason: finishReason,
-      message: { content: JSON.stringify(content) }
-    }]
-  }), { status: 200, headers: { "Content-Type": "application/json" } });
+  return new Response(
+    JSON.stringify({
+      choices: [
+        {
+          finish_reason: finishReason,
+          message: { content: JSON.stringify(content) }
+        }
+      ]
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
 }
 
 function structured(direction = "positive") {
   return {
-    items: [{
-      newsId: "news-1",
-      useful: true,
-      eventType: "order",
-      relatedCodes: ["600000"],
-      relation: "direct",
-      direction,
-      horizon: "short",
-      importance: 78,
-      confidence: 82,
-      summary: "公司披露中标项目，合同尚未最终确认。",
-      mechanism: "若合同落地，可能通过订单和收入预期影响估值。",
-      evidence: ["输入材料称公司中标重大项目"],
-      counterFactors: ["合同尚未最终确认"],
-      missingInformation: ["项目金额占收入比例"]
-    }]
+    items: [
+      {
+        newsId: "news-1",
+        useful: true,
+        eventType: "order",
+        relatedCodes: ["600000"],
+        relation: "direct",
+        direction,
+        horizon: "short",
+        importance: 78,
+        confidence: 82,
+        summary: "公司披露中标项目，合同尚未最终确认。",
+        mechanism: "若合同落地，可能通过订单和收入预期影响估值。",
+        evidence: ["输入材料称公司中标重大项目"],
+        counterFactors: ["合同尚未最终确认"],
+        missingInformation: ["项目金额占收入比例"]
+      }
+    ]
   };
 }
 
@@ -88,7 +91,8 @@ describe("OpenAI-compatible structured analysis", () => {
   it("downgrades model-inferred direct codes to capped industry association", async () => {
     const publicItem = {
       ...item,
-      summary: "这是一段足够长的公开新闻材料，用于确认即使正文内容较完整，只要相关股票代码并未在正文中出现，就不能被模型标成直接关联。",
+      summary:
+        "这是一段足够长的公开新闻材料，用于确认即使正文内容较完整，只要相关股票代码并未在正文中出现，就不能被模型标成直接关联。",
       relatedCodes: []
     };
     const fetcher: typeof fetch = async () => completion(structured());
@@ -101,14 +105,35 @@ describe("OpenAI-compatible structured analysis", () => {
   });
 
   it("uses normalized source tiers when scoring complete official material", async () => {
-    const completeSummary = "这是完整的公开事件材料，包含事件主体、发生时间、核心事实、当前状态、官方披露依据以及仍待确认的后续条件。";
+    const completeSummary =
+      "这是完整的公开事件材料，包含事件主体、发生时间、核心事实、当前状态、官方披露依据以及仍待确认的后续条件。";
     const fetcher: typeof fetch = async () => completion(structured());
-    const [official] = await analyzeNewsBatch([{
-      ...item, summary: completeSummary, source: "cninfo", sourceTier: "official"
-    }], ai, fetcher, { maxAttempts: 1 });
-    const [media] = await analyzeNewsBatch([{
-      ...item, summary: completeSummary, source: "eastmoney", sourceTier: "media"
-    }], ai, fetcher, { maxAttempts: 1 });
+    const [official] = await analyzeNewsBatch(
+      [
+        {
+          ...item,
+          summary: completeSummary,
+          source: "cninfo",
+          sourceTier: "official"
+        }
+      ],
+      ai,
+      fetcher,
+      { maxAttempts: 1 }
+    );
+    const [media] = await analyzeNewsBatch(
+      [
+        {
+          ...item,
+          summary: completeSummary,
+          source: "eastmoney",
+          sourceTier: "media"
+        }
+      ],
+      ai,
+      fetcher,
+      { maxAttempts: 1 }
+    );
     assert.ok((official?.confidence ?? 0) > (media?.confidence ?? 100));
   });
 

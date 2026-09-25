@@ -1,6 +1,8 @@
 import type { NewsItem, NewsSourceTier } from "./types.js";
+import { stableDigest } from "./digest.js";
 
-const COMMON_TITLE_WORDS = /(股份有限公司|有限责任公司|集团股份|集团|公司|关于|公告|的|暨|进展|提示性)/g;
+const COMMON_TITLE_WORDS =
+  /(股份有限公司|有限责任公司|集团股份|集团|公司|关于|公告|的|暨|进展|提示性)/g;
 
 export function normalizeEventTitle(title: string): string {
   return title
@@ -12,12 +14,14 @@ export function normalizeEventTitle(title: string): string {
 
 export function documentFingerprint(item: NewsItem): string {
   const url = item.url.trim().toLowerCase();
-  if (url) return stableHash([item.source, url].join("\u001f"));
-  return stableHash([
-    item.source,
-    normalizeEventTitle(item.title),
-    (item.summary ?? "").replace(/\s+/g, "").slice(0, 2_000)
-  ].join("\u001f"));
+  if (url) return stableDigest([item.source, url].join("\u001f"));
+  return stableDigest(
+    [
+      item.source,
+      normalizeEventTitle(item.title),
+      (item.summary ?? "").replace(/\s+/g, "").slice(0, 2_000)
+    ].join("\u001f")
+  );
 }
 
 export function shouldClusterDocuments(left: NewsItem, right: NewsItem): boolean {
@@ -73,13 +77,4 @@ function diceCoefficient(left: Set<string>, right: Set<string>): number {
   let overlap = 0;
   for (const item of left) if (right.has(item)) overlap += 1;
   return (2 * overlap) / (left.size + right.size);
-}
-
-function stableHash(value: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
 }

@@ -9,11 +9,15 @@ export function parseCsrcPolicyList(
   limit = 20
 ): NewsItem[] {
   const items: NewsItem[] = [];
-  const anchorPattern = /<a\b[^>]*href=["']([^"']*\/csrc\/c100028\/c\d+\/content\.shtml)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const anchorPattern =
+    /<a\b[^>]*href=["']([^"']*\/csrc\/c100028\/c\d+\/content\.shtml)["'][^>]*>([\s\S]*?)<\/a>/gi;
   for (const match of html.matchAll(anchorPattern)) {
     const title = decodeHtml(match[2]!.replace(/<[^>]*>/g, "").replace(/\s+/g, " ")).trim();
     if (!title) continue;
-    const tail = html.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 200);
+    const tail = html.slice(
+      (match.index ?? 0) + match[0].length,
+      (match.index ?? 0) + match[0].length + 200
+    );
     const date = tail.match(/20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}/)?.[0];
     const url = new URL(match[1]!, CSRC_LIST_URL).href;
     items.push({
@@ -35,9 +39,14 @@ export function parseCsrcPolicyList(
 
 export async function fetchCsrcPolicyNews(fetcher = fetch, limit = 20): Promise<NewsItem[]> {
   const fetchedAt = new Date().toISOString();
-  const response = await fetchWithTimeout(fetcher, new URL(CSRC_LIST_URL), {
-    headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" }
-  }, 10_000);
+  const response = await fetchWithTimeout(
+    fetcher,
+    new URL(CSRC_LIST_URL),
+    {
+      headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" }
+    },
+    10_000
+  );
   if (!response.ok) throw new Error(`CSRC policy news failed: ${response.status}`);
   return parseCsrcPolicyList(await response.text(), fetchedAt, limit);
 }
@@ -50,5 +59,9 @@ function parseDate(value: string | undefined, fallback: string): string {
 }
 
 function decodeHtml(value: string): string {
-  return value.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"");
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"');
 }
