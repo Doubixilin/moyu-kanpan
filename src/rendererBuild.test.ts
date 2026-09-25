@@ -16,10 +16,20 @@ describe("settings renderer build contract", () => {
     assert.match(entry, /from "\.\/shortcut\.js"/);
     assert.match(builder, /compileTypeScript\("src\/shortcut\.ts",\s*"shortcut\.js"\)/);
     assert.match(verifier, /verifyRendererImports/);
-    for (const label of ["窗口与页面", "持仓与提醒", "自选与行情", "新闻与 AI", "导入与备份"]) {
-      assert.match(entry, new RegExp(label));
+    // 构建契约：渲染器 import 的模块必须都在 emit 清单里，否则打包后运行时 404。
+    for (const emitted of [
+      "src/settings/views.ts",
+      "src/settings/fields.ts",
+      "src/presentation/format.ts"
+    ]) {
+      assert.ok(builder.includes(emitted), `${emitted} 未加入 build-renderer 的编译清单`);
     }
-    assert.match(entry, /settings-page-section/);
+    // 页面标签与设置页样式类在 §4-5 拆分后位于 views.ts（纯视图构造函数）。
+    const views = await readFile(path.join(root, "src", "settings", "views.ts"), "utf8");
+    for (const label of ["窗口与页面", "持仓与提醒", "自选与行情", "新闻与 AI", "导入与备份"]) {
+      assert.match(views, new RegExp(label));
+    }
+    assert.match(views, /settings-page-section/);
     assert.match(entry, /handleHoldingRuleToggle/);
     assert.match(entry, /当日有买卖时，今日盈亏仅供参考/);
   });

@@ -1,6 +1,6 @@
 import { DEFAULT_BOSS_KEY_ACCELERATOR, parseBossKeyAccelerator } from "./shortcut.js";
 import type { AiRuntimeStatus } from "./domain/types";
-import type { HoldingAlertRules, QuoteField, TabConfig, TabType, UserSettings } from "./config";
+import type { HoldingAlertRules, QuoteField, TabType, UserSettings } from "./config";
 import type { ProfileImportMode, ProfilePreview } from "./settings/profile";
 import { escapeAttr, escapeHtml } from "./presentation/format.js";
 import {
@@ -14,13 +14,17 @@ import {
   type FieldElement
 } from "./settings/fields.js";
 import {
-  holdingAlertInput,
-  holdingRuleDescriptions,
+  holdingRuleSummary,
   nullableNumber,
   option,
   renderAddHolding,
+  renderHoldingSetting,
+  renderProfilePanel,
   renderRiskGroupSetting,
-  renderWatchItem
+  renderSettingsNavigation,
+  renderTabSetting,
+  renderWatchItem,
+  settingsPageClass
 } from "./settings/views.js";
 
 const quoteFields: Array<{ value: QuoteField; label: string }> = [
@@ -72,7 +76,9 @@ function render(): void {
     return;
   }
 
-  const visibleTabs = settings.tabs.filter((tab) => tab.visible);
+  // 捕获为局部常量：`settings` 是模块级变量，在下面的箭头回调里 TS 无法保留非空收窄。
+  const current = settings;
+  const visibleTabs = current.tabs.filter((tab) => tab.visible);
   rootElement.innerHTML = `
     <main class="settings-shell">
       <header class="settings-header">
@@ -86,11 +92,18 @@ function render(): void {
 
       ${message ? `<div class="message ${messageKind}">${escapeHtml(message)}</div>` : ""}
 
-      ${renderSettingsNavigation()}
+      ${renderSettingsNavigation(activeSettingsPage)}
 
-      ${renderProfilePanel()}
+      ${renderProfilePanel({
+        activePage: activeSettingsPage,
+        preview: profilePreview,
+        hasProfileBackup,
+        mode: profileMode,
+        text: profileText,
+        busy: profileBusy
+      })}
 
-      <section class="panel ${settingsPageClass("general")}">
+      <section class="panel ${settingsPageClass("general", activeSettingsPage)}">
         <div class="panel-heading">
           <div>
             <h2>窗口与快捷键</h2>
@@ -129,7 +142,7 @@ function render(): void {
         </div>
         <p class="shortcut-hint">带修饰键时支持字母、数字、标点、空格、导航键及 F1–F24；单键仅允许功能键或媒体键，F11 和系统危险组合禁用。Esc 取消录制。</p>
       </section>
-      <section class="panel ${settingsPageClass("general")}">
+      <section class="panel ${settingsPageClass("general", activeSettingsPage)}">
         <div class="panel-heading">
           <div>
             <h2>页面与默认视图</h2>
@@ -139,7 +152,7 @@ function render(): void {
         </div>
 
         <div class="tab-settings-list">
-          ${settings.tabs.map(renderTabSetting).join("")}
+          ${settings.tabs.map((tab, index) => renderTabSetting(current, tab, index)).join("")}
         </div>
 
         <div class="add-row add-tab-row">
@@ -168,25 +181,27 @@ function render(): void {
         </div>
       </section>
 
-      <section class="panel ${settingsPageClass("portfolio")}">
+      <section class="panel ${settingsPageClass("portfolio", activeSettingsPage)}">
         <div class="panel-heading">
           <div>
             <h2>持仓</h2>
             <p>交易后请同步数量和券商成本价；当日有买卖时，今日盈亏仅供参考。</p>
           </div>
-          <span>${holdingRuleSummary()}</span>
+          <span>${holdingRuleSummary(settings)}</span>
         </div>
         <div class="holding-settings-list">
           ${
             settings.holdings.length
-              ? settings.holdings.map(renderHoldingSetting).join("")
+              ? settings.holdings
+                  .map((holding, index) => renderHoldingSetting(current, holding, index))
+                  .join("")
               : '<div class="inline-empty">尚未配置持仓</div>'
           }
         </div>
         ${renderAddHolding(settings.securities, settings.holdings)}
       </section>
 
-      <section class="panel risk-panel ${settingsPageClass("portfolio")}">
+      <section class="panel risk-panel ${settingsPageClass("portfolio", activeSettingsPage)}">
         <div class="panel-heading">
           <div>
             <h2>交易规则与提醒</h2>
@@ -230,7 +245,7 @@ function render(): void {
         <button class="secondary-action" data-action="add-risk-group">添加风险组</button>
       </section>
 
-      <section class="panel ${settingsPageClass("quotes")}">
+      <section class="panel ${settingsPageClass("quotes", activeSettingsPage)}">
         <div class="panel-heading">
           <div>
             <h2>自选股</h2>
@@ -252,7 +267,7 @@ function render(): void {
         </div>
       </section>
 
-      <section class="panel ${settingsPageClass("quotes")}">
+      <section class="panel ${settingsPageClass("quotes", activeSettingsPage)}">
         <div class="panel-heading">
           <div>
             <h2>行情显示</h2>
@@ -281,7 +296,7 @@ function render(): void {
         </label>
       </section>
 
-      <section class="panel ai-panel ${settingsPageClass("news-ai")}">
+      <section class="panel ai-panel ${settingsPageClass("news-ai", activeSettingsPage)}">
         <div class="panel-heading">
           <div>
             <h2>AI 快速分析</h2>
@@ -310,7 +325,7 @@ function render(): void {
         <p class="ai-privacy-note">模型仅接收新闻标题、摘要、来源、时间和新闻自身包含的公开代码；不会接收完整持仓组合。DeepSeek 模式固定关闭深度思考并要求 JSON 输出。</p>
       </section>
 
-      <section class="panel ${settingsPageClass("news-ai")}">
+      <section class="panel ${settingsPageClass("news-ai", activeSettingsPage)}">
         <div class="panel-heading">
           <div>
             <h2>快讯基础设置</h2>
@@ -331,7 +346,7 @@ function render(): void {
         </label>
       </section>
 
-      <section class="panel ${settingsPageClass("general")}">
+      <section class="panel ${settingsPageClass("general", activeSettingsPage)}">
         <div class="panel-heading">
           <div>
             <h2>外观</h2>
@@ -362,212 +377,6 @@ function render(): void {
         <button class="primary" data-action="save">保存设置</button>
       </footer>
     </main>
-  `;
-}
-
-function renderSettingsNavigation(): string {
-  const pages: Array<{ id: SettingsPage; label: string }> = [
-    { id: "general", label: "窗口与页面" },
-    { id: "portfolio", label: "持仓与提醒" },
-    { id: "quotes", label: "自选与行情" },
-    { id: "news-ai", label: "新闻与 AI" },
-    { id: "data", label: "导入与备份" }
-  ];
-  return `
-    <nav class="settings-tab-nav" aria-label="设置分类">
-      ${pages
-        .map(
-          (page) => `
-        <button type="button" data-action="settings-page" data-page="${page.id}"
-          class="${activeSettingsPage === page.id ? "active" : ""}"
-          aria-selected="${activeSettingsPage === page.id}">${page.label}</button>
-      `
-        )
-        .join("")}
-    </nav>
-  `;
-}
-
-function settingsPageClass(page: SettingsPage): string {
-  return `settings-page-section${activeSettingsPage === page ? " is-active" : ""}`;
-}
-
-function holdingRuleSummary(): string {
-  if (!settings) return "";
-  const enabledHoldings = settings.holdings.filter((holding) => holding.alertRules.enabled).length;
-  const ruleCount = settings.holdings.reduce(
-    (count, holding) =>
-      count + holdingRuleDescriptions(holding.alertRules, holding.costPrice).length,
-    0
-  );
-  return `${settings.holdings.length} 只 · ${enabledHoldings} 只提醒 · ${ruleCount} 条规则`;
-}
-
-function renderProfilePanel(): string {
-  const preview = profilePreview;
-  return `
-    <section class="panel profile-panel ${settingsPageClass("data")}">
-      <div class="panel-heading">
-        <div>
-          <h2>配置导入与备份</h2>
-          <p>手动编辑适合日常修改；Coze 或其他智能体可按严格格式生成批量配置包。</p>
-        </div>
-        <span>本地校验</span>
-      </div>
-      <div class="profile-toolbar">
-        <button type="button" data-action="copy-profile-prompt">复制给 AI 的提示词</button>
-        <button type="button" data-action="copy-profile-export">复制当前配置包</button>
-        <label class="file-action">
-          选择 JSON 文件
-          <input type="file" data-setting="profile-file" accept="application/json,.json" />
-        </label>
-        <button type="button" data-action="restore-profile" ${hasProfileBackup ? "" : "disabled"}>恢复上次导入前配置</button>
-      </div>
-      <div class="profile-mode-row">
-        <label><span>导入方式</span><select data-setting="profile-mode">${option("merge", "合并：保留未提供的配置", profileMode)}${option("replace", "替换：替换包中明确提供的持仓/自选", profileMode)}</select></label>
-        <span>含提醒规则的配置包会强制先进入影子模式。</span>
-      </div>
-      <label class="profile-json-field">
-        <span>粘贴 AI 返回的 JSON，或选择文件</span>
-        <textarea data-setting="profile-text" spellcheck="false" placeholder="{&#10;  &quot;profileVersion&quot;: 1,&#10;  ...&#10;}">${escapeHtml(profileText)}</textarea>
-      </label>
-      <div class="profile-actions">
-        <button type="button" data-action="preview-profile" ${profileBusy || !profileText.trim() ? "disabled" : ""}>${profileBusy ? "处理中…" : "预览差异"}</button>
-        <button type="button" class="primary" data-action="apply-profile" ${profileBusy || !preview?.valid || !preview.hasChanges ? "disabled" : ""}>确认导入</button>
-        <button type="button" data-action="clear-profile" ${profileBusy || !profileText ? "disabled" : ""}>清空</button>
-      </div>
-      ${preview ? renderProfilePreview(preview) : '<div class="profile-empty">导入前不会修改任何设置。先预览差异，再确认保存。</div>'}
-    </section>
-  `;
-}
-
-function renderProfilePreview(preview: ProfilePreview): string {
-  const diff = preview.diff;
-  const rows = [
-    ["新增证券", diff.securitiesAdded],
-    ["更新证券", diff.securitiesUpdated],
-    ["新增持仓", diff.holdingsAdded],
-    ["更新持仓", diff.holdingsUpdated],
-    ["删除持仓", diff.holdingsRemoved],
-    ["新增自选", diff.watchlistAdded],
-    ["更新自选", diff.watchlistUpdated],
-    ["删除自选", diff.watchlistRemoved]
-  ] as const;
-  return `
-    <div class="profile-preview ${preview.valid ? "valid" : "invalid"}">
-      <strong>${preview.valid ? (preview.hasChanges ? "校验通过，可以导入" : "校验通过，没有变化") : "校验失败，不会应用"}</strong>
-      <div class="profile-diff-grid">
-        ${rows.map(([label, codes]) => `<span><b>${label}</b>${codes.length ? escapeHtml(codes.join("、")) : "无"}</span>`).join("")}
-        <span><b>提醒规则变化</b>${diff.alertRuleChanges}</span>
-        <span><b>全局风险设置</b>${diff.riskSettingsChanged ? "有变化" : "无变化"}</span>
-      </div>
-      ${
-        preview.issues.length
-          ? `
-        <div class="profile-issues">
-          ${preview.issues.map((issue) => `<span class="${issue.severity}">${issue.severity === "error" ? "错误" : "提醒"} · ${escapeHtml(issue.path)}：${escapeHtml(issue.message)}</span>`).join("")}
-        </div>
-      `
-          : ""
-      }
-    </div>
-  `;
-}
-
-function renderTabSetting(tab: TabConfig, index: number): string {
-  const stockSelector =
-    !tab.builtIn && tab.type === "stock-list"
-      ? `
-      <details class="tab-security-picker">
-        <summary>选择股票（${tab.securityCodes.length}）</summary>
-        <div class="security-check-grid">
-          ${settings!.watchlist
-            .map((item) => {
-              const security = securityFor(item.securityCode);
-              return `
-              <label>
-                <input type="checkbox" data-setting="tab-security" data-tab-id="${escapeAttr(tab.id)}" value="${item.securityCode}" ${tab.securityCodes.includes(item.securityCode) ? "checked" : ""} />
-                <span>${escapeHtml(security?.alias || security?.name || item.securityCode)}</span>
-              </label>
-            `;
-            })
-            .join("")}
-        </div>
-      </details>
-    `
-      : "";
-
-  return `
-    <div class="tab-setting-block">
-      <div class="tab-setting-row" data-tab-index="${index}">
-        <label class="visibility">
-          <input type="checkbox" data-setting="tab-visible" ${tab.visible ? "checked" : ""} />
-          <span>显示</span>
-        </label>
-        <span class="tab-type">${tabTypeLabels[tab.type]}</span>
-        <input data-setting="tab-title" maxlength="12" value="${escapeAttr(tab.title)}" ${tab.builtIn ? "readonly" : ""} aria-label="页面名称" />
-        <div class="row-actions">
-          <button data-action="tab-up" title="上移" ${index === 0 ? "disabled" : ""}>↑</button>
-          <button data-action="tab-down" title="下移" ${index === settings!.tabs.length - 1 ? "disabled" : ""}>↓</button>
-          ${tab.builtIn ? '<span class="built-in-mark">内置</span>' : '<button data-action="delete-tab" class="danger" title="删除">×</button>'}
-        </div>
-      </div>
-      ${stockSelector}
-    </div>
-  `;
-}
-
-function renderHoldingSetting(holding: UserSettings["holdings"][number], index: number): string {
-  const security = securityFor(holding.securityCode);
-  const rules = holding.alertRules;
-  const ruleDescriptions = holdingRuleDescriptions(rules, holding.costPrice);
-  const configuredCount = ruleDescriptions.length;
-  return `
-    <div class="holding-setting-block" data-holding-index="${index}">
-      <div class="holding-setting-row">
-        <span class="security-label"><strong>${escapeHtml(security?.alias || security?.name || holding.securityCode)}</strong><small>${holding.securityCode}</small></span>
-        <label><span>数量</span><input data-setting="holding-quantity" type="number" min="1" step="1" value="${holding.quantity}" /></label>
-        <label><span>成本</span><input data-setting="holding-cost" type="number" min="0.0001" step="0.001" value="${holding.costPrice}" /></label>
-        <label><span>风险组</span><select data-setting="holding-group"><option value="all">未分组</option>${settings!.risk.groups.map((group) => option(group.id, group.name, holding.groupId)).join("")}</select></label>
-        <button data-action="delete-holding" class="danger compact-button" title="移出持仓">×</button>
-      </div>
-      <details class="holding-rule-details">
-        <summary><span>警戒线与提醒</span><small>${configuredCount ? `${rules.enabled ? "已启用" : "已暂停"} · ${configuredCount} 条` : "未配置"}</small></summary>
-        <div class="holding-rule-toolbar">
-          <label class="check-card"><input data-setting="holding-alert-enabled" type="checkbox" ${rules.enabled ? "checked" : ""} /><span>启用该持仓提醒</span></label>
-          <button type="button" class="danger" data-action="clear-holding-rules" ${configuredCount || rules.enabled ? "" : "disabled"}>清空规则</button>
-        </div>
-        ${configuredCount ? `<div class="holding-rule-preview">${ruleDescriptions.map((description) => `<span>${escapeHtml(description)}</span>`).join("")}</div>` : '<p class="holding-rule-empty">未设置机械条件，不会因该持仓主动提醒。</p>'}
-        <div class="holding-alert-section">
-          <strong>价格警戒线</strong>
-          <div class="holding-alert-grid">
-            ${holdingAlertInput("holding-stop-loss", "跌破止损价", rules.stopLossPrice)}
-            ${holdingAlertInput("holding-watch-price", "到达观察线", rules.watchPrice)}
-            ${holdingAlertInput("holding-price-above", "向上突破价", rules.priceAbove)}
-            ${holdingAlertInput("holding-price-below", "向下跌破价", rules.priceBelow)}
-          </div>
-        </div>
-        <div class="holding-alert-section">
-          <strong>当日涨跌幅</strong>
-          <div class="holding-alert-grid holding-alert-grid-two">
-            ${holdingAlertInput("holding-rise-percent", "今日涨幅达到 %", rules.risePercent)}
-            ${holdingAlertInput("holding-fall-percent", "今日跌幅达到 %", rules.fallPercent)}
-          </div>
-        </div>
-        <div class="holding-alert-section">
-          <strong>盈亏金额</strong>
-          <div class="holding-alert-grid">
-            ${holdingAlertInput("holding-daily-profit", "今日盈利达到", rules.dailyProfitAmount)}
-            ${holdingAlertInput("holding-daily-loss", "今日亏损达到", rules.dailyLossAmount)}
-            ${holdingAlertInput("holding-total-profit", "累计盈利达到", rules.totalProfitAmount)}
-            ${holdingAlertInput("holding-total-loss", "累计亏损达到", rules.totalLossAmount)}
-          </div>
-        </div>
-        <div class="holding-alert-section">
-          <label class="holding-note"><span>备注 / 持有逻辑（仅展示）</span><input data-setting="holding-note" maxlength="120" value="${escapeAttr(holding.note)}" placeholder="本地展示，不参与规则解释" /></label>
-        </div>
-      </details>
-    </div>
   `;
 }
 

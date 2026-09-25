@@ -117,15 +117,16 @@
 | 47 | §9 S-21 逐行盈亏用原始价格 | `renderer.ts` 的 `renderHoldingRow` 改用 `risk.totalPnl`/`risk.totalPnlPercent`（风险模型用 `finitePositive` 清洗过价格，数据不安全时整体为 `null` → 显示 `--`），与风险面板、汇总卡口径一致 | `tsc` + `eslint` + 构建通过；此前与风险面板一致仅依赖上游不变量 |
 | 48 | §4-10 死 CSS（约 39 行） | 删除经 grep 确认**在全部 TS 中零引用**的规则：`styles.css` 的 `.news-title`/`.news-summary`（含 stealth 覆盖）与 `.driver-inference`（含 stealth 覆盖），`settings.css` 的 `.code-input`、`.split-panel`（含媒体查询内） | 删除前逐个类名复查引用数为 0；删除后 `verify` 与三个 smoke 全部通过 |
 
-**Phase E 尚未完成**（需 GUI 回归，见下方"尚未处理"）：`settingsRenderer.ts` 的拆分（审计报告 §4-5 的三步：视图 → 控制器 → 声明式字段表）、以及把 `settings.css` 的 127 处硬编码色值收敛为 CSS token 层。这两项都是纯前端结构调整，**必须在实机确认设置页与各外观无回归**后才能算完成。
+**Phase E 进行中**：`settingsRenderer.ts` 的拆分已完成 §4-5 三步中的**声明式字段表**（#49）与**视图构造函数**（#50），控制器（AI/个人配置/老板键三块 DOM 事件逻辑）尚未外移；`settings.css` 的 127 处硬编码色值收敛为 CSS token 层（§4-10 下半）未做。剩下的都是纯前端结构调整，**必须在实机确认设置页与各外观无回归**后才能算完成。
 
 #### 续：§4-5 第一步（声明式字段表）已完成
 
 | # | 条目 | 修改 | 验证方式 |
 | --- | --- | --- | --- |
 | 49 | §4-5 把 190 行派发函数换成声明式字段表 | 新增 `src/settings/fields.ts`（320 行）：`SETTINGS_FIELD_UPDATERS` 顶层字段表 + `WATCH_ROW_FIELDS`/`HOLDING_ROW_FIELDS`/`RISK_GROUP_ROW_FIELDS`/`TAB_ROW_FIELDS` 行内表 + `nullableInputNumber`/`nullableInputInteger`/`HOLDING_ALERT_NUMBER_FIELDS`。**模块只写 settings，不碰 DOM、不碰模块级状态**：重渲染、错误提示、重置老板键录制、更新透明度标签都通过返回值交给渲染层。`settingsRenderer.ts` 的 `handleFormChange` 缩成约 110 行的"取 `data-setting` → 定位行 → 应用副作用"薄壳 | `src/settings/__tests__/fields.test.ts`（182 行、**13 个用例**）覆盖原本零测试的逻辑：数值边界（`Math.max(0.1,…)`/`5–120`/`1–30`/冷却取整）、`default-tab` 不做 trim、行情字段上限 5 且**只提示不写入**、`tab-security` 按 tabId 增删且未知 tab 不崩、三个字段只在 `change` 时重渲染、关闭老板键才重置录制、服务商默认值回填、未知字段不写入 |
+| 50 | §4-5 第二步：视图构造函数全部外移 | 扩写 `src/settings/views.ts`（362 行）为纯构造函数集合：`nullableNumber`/`option`/`displayNameForCode`（别名→名称→代码的唯一实现，此前渲染层有 9 处副本）/`settingsPageClass`/`renderSettingsNavigation`/`holdingRuleSummary`/`holdingAlertInput`/`formatRuleAmount`/`holdingRuleDescriptions`/`renderWatchItem`/`renderRiskGroupSetting`/`renderAddHolding`/`renderTabSetting`/`renderHoldingSetting`/`renderProfilePreview`/`renderProfilePanel`。**一律显式传参**，不再像原先那样读模块级 `settings` 全局（那几个函数因此根本无法单测）；转义统一走 `presentation/format.ts`。`settingsRenderer.ts` **1580 → 1131 行** | `src/settings/__tests__/views.test.ts` 从 7 个用例扩到 **14 个**（新增：导航只高亮当前分类且 `aria-selected` 唯一、别名→名称→代码回退、内置页 `readonly`+「内置」标记且无删除按钮 vs 自定义页有 `delete-tab`、中间行方向键不禁用、规则「未配置 / 已启用 · N 条 / 已暂停 · N 条」与"清空规则"按钮禁用态、`holdingRuleSummary` 计数、导入预览的 `valid/invalid` 与错误/提醒分级、导入面板按钮禁用矩阵与 JSON 转义）。`views.ts` 语句/行覆盖 **100%**；`rendererBuild.test.ts` 增加契约断言：`build-renderer.mjs` 的编译清单必须包含 `settings/views.ts`、`settings/fields.ts`、`presentation/format.ts`（漏加会让 `npm run build` 的 import 闭包校验失败） |
 
-**这一步的额外收获**：分支覆盖率 73.65% → **74.08%**，总测试 190 → **203**。`handleFormChange` 原本是设置界面唯一承载全部逻辑的函数且完全没被测试；现在它的逻辑被完整覆盖，剩下的薄壳只做 DOM 定位。这也让后续"抽取视图构造函数"（§4-5 第一步）风险明显降低——字段逻辑已经不在那个 1400 行文件里了。
+**这一步的额外收获**：分支覆盖率 73.65% → 74.08% → **74.82%**，总测试 190 → 203 → **217**。`handleFormChange` 原本是设置界面唯一承载全部逻辑的函数且完全没被测试；现在它的逻辑被完整覆盖，剩下的薄壳只做 DOM 定位。同理，视图构造函数外移前也没有任何测试（它们读模块级全局），现在 `views.ts` 的语句/行覆盖到 **100%**（整体行覆盖率回到 **91.6%**）。这也让后续"抽取控制器"（§4-5 第三步）风险明显降低——字段逻辑与渲染逻辑都已经不在那个 1100 行文件里了。
 
 **行为变更提示（需人工确认）**：`assertSavableSettings` 现在会**拒绝**超出量级或非整数的持仓数量/成本。设置界面本身已把输入钳制在合法范围（`Math.max(1, Math.round(...))`、`Math.max(0.0001, ...)`），因此正常操作不受影响；手工编辑 `settings.json` 或导入异常配置包会得到明确报错，而不是静默改写数据。
 
@@ -133,7 +134,7 @@
 
 **尚未处理**（按报告路线图，需要更大改动或人工验证）：
 
-- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分（§4-5 的三步：视图 → 控制器 → 声明式字段表，该文件 1400+ 行、零测试，**必须先有实机回归手段或先补测试**）；`settings.css` 的 CSS token 层（§4-10 的色值收敛部分）。已完成的共享转义层为前者铺好了路（`presentation/format.ts` 已就位，`src/renderer/dom.ts` 可依此建立）。
+- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分只剩 §4-5 第三步的**控制器**（AI 设置、个人配置导入、老板键录制三块 DOM 事件逻辑，连同 `handleClick` 的约 177 行与 `render()` 外壳）；`settings.css` 的 CSS token 层（§4-10 的色值收敛部分）。已完成的共享转义层与纯视图层为前者铺好了路（`presentation/format.ts`、`src/settings/views.ts` 已就位）。
 - **Phase F（GUI 相关，最后）**：§7-1 Electron 39 升级到受支持版本。代码改动可做，但**透明窗口/置顶/托盘/老板键/`safeStorage`/`node:sqlite` 需要实机回归**，无法在无 GUI 环境自动验证。
 - **其余未做（有意）**：
   - §9 **S-24**：`docs/marketing/**` 约 2 MB PNG 在 Git 历史里；README 直接引用这些图，改动收益低，保持原样。
@@ -350,6 +351,7 @@
 
 三个巨型函数占该文件 **636 行 = 42.5%**：`render`（`:74-361`，288 行）、`handleClick`（`:829-1005`，177 行，30 分支/18 动作）、`handleFormChange`（`:657-827`，171 行，40 分支 `if (setting === "...")`，靠读 DOM 行索引定位状态并就地改 `settings`）。DOM、状态、校验、序列化、事件接线全在其中。
 - 修复（三步，各自可独立发布）：① 抽纯视图构造到 `src/settings/views/*.ts`（零行为变更，约减 350 行）；② 抽 `src/settings/controllers/{ai,profile,bossKey}.ts`，以 `{get, patch, send}` 注入；③ 抽声明式字段表 `src/settings/fields.ts`，把 171 行 dispatcher 变查表（约 40 行）。**先做③**，它会暴露真实状态形状。
+  - **进度：③ 与 ① 已完成**（`fields.ts` 340 行、`views.ts` 362 行、共 27 个新用例；`settingsRenderer.ts` 1580 → **1131 行**，见 §0.1 #49/#50）。② 待做：`handleClick`（177 行/18 动作）、`render()` 外壳与三块控制器逻辑。
 
 ### 4-6 【中】`settingsRenderer.ts` 整页重渲染的连带 bug
 
