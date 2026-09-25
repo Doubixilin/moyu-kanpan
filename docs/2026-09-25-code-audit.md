@@ -119,14 +119,20 @@
 
 **Phase E 进行中**：`settingsRenderer.ts` 的拆分已完成 §4-5 三步中的**声明式字段表**（#49）与**视图构造函数**（#50），控制器（AI/个人配置/老板键三块 DOM 事件逻辑）尚未外移；`settings.css` 的 127 处硬编码色值收敛为 CSS token 层（§4-10 下半）未做。剩下的都是纯前端结构调整，**必须在实机确认设置页与各外观无回归**后才能算完成。
 
-#### 续：§4-5 第一步（声明式字段表）已完成
+#### 续：§4-5 三步拆分全部完成（字段表 → 视图 → 控制器）
 
 | # | 条目 | 修改 | 验证方式 |
 | --- | --- | --- | --- |
 | 49 | §4-5 把 190 行派发函数换成声明式字段表 | 新增 `src/settings/fields.ts`（320 行）：`SETTINGS_FIELD_UPDATERS` 顶层字段表 + `WATCH_ROW_FIELDS`/`HOLDING_ROW_FIELDS`/`RISK_GROUP_ROW_FIELDS`/`TAB_ROW_FIELDS` 行内表 + `nullableInputNumber`/`nullableInputInteger`/`HOLDING_ALERT_NUMBER_FIELDS`。**模块只写 settings，不碰 DOM、不碰模块级状态**：重渲染、错误提示、重置老板键录制、更新透明度标签都通过返回值交给渲染层。`settingsRenderer.ts` 的 `handleFormChange` 缩成约 110 行的"取 `data-setting` → 定位行 → 应用副作用"薄壳 | `src/settings/__tests__/fields.test.ts`（182 行、**13 个用例**）覆盖原本零测试的逻辑：数值边界（`Math.max(0.1,…)`/`5–120`/`1–30`/冷却取整）、`default-tab` 不做 trim、行情字段上限 5 且**只提示不写入**、`tab-security` 按 tabId 增删且未知 tab 不崩、三个字段只在 `change` 时重渲染、关闭老板键才重置录制、服务商默认值回填、未知字段不写入 |
-| 50 | §4-5 第二步：视图构造函数全部外移 | 扩写 `src/settings/views.ts`（362 行）为纯构造函数集合：`nullableNumber`/`option`/`displayNameForCode`（别名→名称→代码的唯一实现，此前渲染层有 9 处副本）/`settingsPageClass`/`renderSettingsNavigation`/`holdingRuleSummary`/`holdingAlertInput`/`formatRuleAmount`/`holdingRuleDescriptions`/`renderWatchItem`/`renderRiskGroupSetting`/`renderAddHolding`/`renderTabSetting`/`renderHoldingSetting`/`renderProfilePreview`/`renderProfilePanel`。**一律显式传参**，不再像原先那样读模块级 `settings` 全局（那几个函数因此根本无法单测）；转义统一走 `presentation/format.ts`。`settingsRenderer.ts` **1580 → 1131 行** | `src/settings/__tests__/views.test.ts` 从 7 个用例扩到 **14 个**（新增：导航只高亮当前分类且 `aria-selected` 唯一、别名→名称→代码回退、内置页 `readonly`+「内置」标记且无删除按钮 vs 自定义页有 `delete-tab`、中间行方向键不禁用、规则「未配置 / 已启用 · N 条 / 已暂停 · N 条」与"清空规则"按钮禁用态、`holdingRuleSummary` 计数、导入预览的 `valid/invalid` 与错误/提醒分级、导入面板按钮禁用矩阵与 JSON 转义）。`views.ts` 语句/行覆盖 **100%**；`rendererBuild.test.ts` 增加契约断言：`build-renderer.mjs` 的编译清单必须包含 `settings/views.ts`、`settings/fields.ts`、`presentation/format.ts`（漏加会让 `npm run build` 的 import 闭包校验失败） |
+| 50 | §4-5 第二步：视图构造函数全部外移 | 扩写 `src/settings/views.ts`（362 行）为纯构造函数集合：`nullableNumber`/`option`/`displayNameForCode`（别名→名称→代码的唯一实现，此前渲染层有 9 处副本）/`settingsPageClass`/`renderSettingsNavigation`/`holdingRuleSummary`/`holdingAlertInput`/`formatRuleAmount`/`holdingRuleDescriptions`/`renderWatchItem`/`renderRiskGroupSetting`/`renderAddHolding`/`renderTabSetting`/`renderHoldingSetting`/`renderProfilePreview`/`renderProfilePanel`。**一律显式传参**，不再像原先那样读模块级 `settings` 全局（那几个函数因此根本无法单测）；转义统一走 `presentation/format.ts`。`settingsRenderer.ts` **1398 → 1204 行**（净减 194 行；被移出的 171 行 dispatcher 与散落的视图字符串换成了 `fields.ts` 340 行 + `views.ts` 362 行的显式表/构造函数——行数不是收益，可测试性才是） | `src/settings/__tests__/views.test.ts` 从 7 个用例扩到 **14 个**（新增：导航只高亮当前分类且 `aria-selected` 唯一、别名→名称→代码回退、内置页 `readonly`+「内置」标记且无删除按钮 vs 自定义页有 `delete-tab`、中间行方向键不禁用、规则「未配置 / 已启用 · N 条 / 已暂停 · N 条」与"清空规则"按钮禁用态、`holdingRuleSummary` 计数、导入预览的 `valid/invalid` 与错误/提醒分级、导入面板按钮禁用矩阵与 JSON 转义）。`views.ts` 语句/行覆盖 **100%**；`rendererBuild.test.ts` 增加契约断言：`build-renderer.mjs` 的编译清单必须包含 `settings/views.ts`、`settings/fields.ts`、`presentation/format.ts`（漏加会让 `npm run build` 的 import 闭包校验失败） |
+| 51 | §4-5 第三步：控制器外移（AI / 个人配置 / 老板键） | 新增 `src/settings/controllers/`：`ports.ts`（端口约定 + `describeError`）、`bossKey.ts`（纯函数：`code`→accelerator 的 40 项映射、`acceleratorFromKeyboardEvent`、`displayBossKey`、把一次按键判成"取消/仅修饰键/不支持/接受"的 `bossKeyCaptureOutcome`）、`ai.ts`（`AiSettingsController`：草稿 Key、连接状态、忙碌标记 + `test`/`clearCredential`/`syncAfterSave`）、`profile.ts`（`ProfileImportController`：草稿文本/导入方式/预览/忙碌/备份标记 + 读文件、复制提示词、复制配置包、预览、导入、恢复 6 条流程）。控制器只通过 `{ipc(), render, notify, clearMessage, confirm, applySettings}` 端口与宿主交互：**不读 DOM、不读模块级变量、不碰 `window`** | `src/settings/__tests__/controllers.test.ts`（**25 个用例**）覆盖：修饰键顺序与危险组合（`Alt+F4`/`F11`/无修饰的普通字母）、录制结果四种分支、徽标文案与 Key 占位提示的全部状态、草稿 Key 截断与 trim、测试连接/清除凭据/保存后落盘的调用与提示顺序、preload 缺失与"忙碌中"重入、预览三态文案、改动即作废旧预览、超限文件不读进内存、`replace` 与恢复备份的确认门槛、导入失败保留草稿、无 bridge 时的全流程空操作 |
+| 52 | §4-8 设置页模块级可变绑定（部分） | `settingsRenderer.ts` **1204 → 979 行**；`aiStatus`/`pendingAiApiKey`/`aiBusy`/`profileText`/`profileMode`/`profilePreview`/`profileBusy`/`hasProfileBackup` **8 个**模块级 `let` 消失（§4-8 记录的"13 个同级可变全局"减少 8 个），同时删掉了本地重复的 `SettingsPage` 类型（改用 `views.ts` 的导出） | 同 #51；`npm run verify` + `build-renderer.mjs` 的 import 闭包校验通过（4 个控制器模块已加入编译清单） |
 
-**这一步的额外收获**：分支覆盖率 73.65% → 74.08% → **74.82%**，总测试 190 → 203 → **217**。`handleFormChange` 原本是设置界面唯一承载全部逻辑的函数且完全没被测试；现在它的逻辑被完整覆盖，剩下的薄壳只做 DOM 定位。同理，视图构造函数外移前也没有任何测试（它们读模块级全局），现在 `views.ts` 的语句/行覆盖到 **100%**（整体行覆盖率回到 **91.6%**）。这也让后续"抽取控制器"（§4-5 第三步）风险明显降低——字段逻辑与渲染逻辑都已经不在那个 1100 行文件里了。
+**这一步的额外收获**：分支覆盖率 73.65% → 74.08% → 74.82% → **75.66%**，总测试 190 → 203 → 217 → **242**。`handleFormChange` 原本是设置界面唯一承载全部逻辑的函数且完全没被测试；现在它的逻辑被完整覆盖，剩下的薄壳只做 DOM 定位。同理，视图构造函数外移前也没有任何测试（它们读模块级全局），现在 `views.ts` 的语句/行覆盖到 **100%**；控制器外移前同样零测试，现在 `src/settings/controllers/**` 语句覆盖 **97.96%**（整体行覆盖率 **91.87%**）。三层拆完后，那个文件里只剩下 DOM 定位、整页模板与事件接线。
+
+**行为保真点（改动前后逐条对照过，需人工抽查）**：测试连接前先清空旧提示；"不支持的按键"**保持录制状态**让用户直接换键重试（只有 Esc 才退出录制）；超过 2MB 的配置包不读进内存；`replace` 导入与恢复备份必须先确认；导入失败保留草稿文本；`test-ai` 用当前草稿 Key 覆盖已保存配置但**只测不写**；保存成功后才把草稿 Key 写入系统安全存储（写失败仍走 `save()` 的统一错误提示）。唯一已知差异：预览/导入/恢复流程中 `notify` 会立即渲染一次（旧实现是攒到 `finally` 只渲染一次），最终画面一致，只多一次整页重渲染——这正是 §4-6 记的"整页重渲染"，属于既有问题。
+
+**验证旁注**：本轮 `smoke:data` 首两次运行因上游 2.5s 超时失败、第三次通过（`Request timed out after 2500ms`，同一时段 `smoke:news`/`smoke:profile` 正常）。该脚本每次请求的预算本来就紧，属于已知易抖动项，不是本次改动引入的回归。
 
 **行为变更提示（需人工确认）**：`assertSavableSettings` 现在会**拒绝**超出量级或非整数的持仓数量/成本。设置界面本身已把输入钳制在合法范围（`Math.max(1, Math.round(...))`、`Math.max(0.0001, ...)`），因此正常操作不受影响；手工编辑 `settings.json` 或导入异常配置包会得到明确报错，而不是静默改写数据。
 
@@ -134,7 +140,7 @@
 
 **尚未处理**（按报告路线图，需要更大改动或人工验证）：
 
-- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分只剩 §4-5 第三步的**控制器**（AI 设置、个人配置导入、老板键录制三块 DOM 事件逻辑，连同 `handleClick` 的约 177 行与 `render()` 外壳）；`settings.css` 的 CSS token 层（§4-10 的色值收敛部分）。已完成的共享转义层与纯视图层为前者铺好了路（`presentation/format.ts`、`src/settings/views.ts` 已就位）。
+- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分已完成 §4-5 三步（字段表 → 视图 → 控制器），文件从 1398 行降到 **979 行**；剩下 `handleClick`（约 177 行、18 个动作）、`render()` 整页模板与 `handleFormChange` 薄壳，这三块本身就是"DOM 定位 + 事件接线"，继续拆的收益低于实机回归风险，暂缓。`settings.css` 的 CSS token 层（§4-10 的色值收敛部分）同样未做。
 - **Phase F（GUI 相关，最后）**：§7-1 Electron 39 升级到受支持版本。代码改动可做，但**透明窗口/置顶/托盘/老板键/`safeStorage`/`node:sqlite` 需要实机回归**，无法在无 GUI 环境自动验证。
 - **其余未做（有意）**：
   - §9 **S-24**：`docs/marketing/**` 约 2 MB PNG 在 Git 历史里；README 直接引用这些图，改动收益低，保持原样。
@@ -351,7 +357,7 @@
 
 三个巨型函数占该文件 **636 行 = 42.5%**：`render`（`:74-361`，288 行）、`handleClick`（`:829-1005`，177 行，30 分支/18 动作）、`handleFormChange`（`:657-827`，171 行，40 分支 `if (setting === "...")`，靠读 DOM 行索引定位状态并就地改 `settings`）。DOM、状态、校验、序列化、事件接线全在其中。
 - 修复（三步，各自可独立发布）：① 抽纯视图构造到 `src/settings/views/*.ts`（零行为变更，约减 350 行）；② 抽 `src/settings/controllers/{ai,profile,bossKey}.ts`，以 `{get, patch, send}` 注入；③ 抽声明式字段表 `src/settings/fields.ts`，把 171 行 dispatcher 变查表（约 40 行）。**先做③**，它会暴露真实状态形状。
-  - **进度：③ 与 ① 已完成**（`fields.ts` 340 行、`views.ts` 362 行、共 27 个新用例；`settingsRenderer.ts` 1580 → **1131 行**，见 §0.1 #49/#50）。② 待做：`handleClick`（177 行/18 动作）、`render()` 外壳与三块控制器逻辑。
+  - **进度：① ② ③ 全部完成**（`fields.ts` 340 行 + 205 行测试、`views.ts` 362 行 + 353 行测试、`controllers/**` 4 个模块 + 305 行测试，共 52 个新用例；`settingsRenderer.ts` 1398 → **979 行**，模块级可变全局减少 8 个，见 §0.1 #49/#50/#51/#52）。剩下未拆的是 `handleClick`（177 行/18 动作）、`render()` 整页模板与 `handleFormChange` 薄壳——它们只剩 DOM 定位与事件接线。
 
 ### 4-6 【中】`settingsRenderer.ts` 整页重渲染的连带 bug
 
@@ -378,6 +384,7 @@
 `settingsRenderer.ts:55` `let settings: UserSettings | null = null`，其后 13 个同级可变全局，**7 处 `settings!` 非空断言**（`:166/:469/:494/:517/:600/:601/:634`）→ 任一渲染路径在 `settings` 加载前执行即运行时 `TypeError`，而该文件**无任何测试**。其他具体簇：`excelRenderer` 的自定义单元格需同时写 4 处（`commitCustomCell` `:370-385` 的 `:375/:379/:381/:382`）；`message`(`:56`) + `messageKind`(`:57`) 在 5 处成对手工设置（漏一个就渲染无样式的 `class="message "`）；`pendingAiApiKey`(`:60`) 是输入框的影子副本；`renderer.ts` 的"当前标签页"存在 **4 处**；点击穿透状态存在 **3 处**且 `:1003-1004` 乐观切换**无回滚**，IPC 失败时按钮 `aria-pressed`(`:231`) 与实际不符。
 另有一处 UI 说谎：`handleFormChange` 的 `profile-text` 分支（`:663-667`）改写文本后**不重渲染**（每键触发，有意为之）→ "预览差异"成功后改动一个字符，旧预览面板仍在屏幕上、"确认导入"仍为启用态（`:426`），只在点击时才被 `:1065` 的复查拦住。
 - 修复：`settings` 参数化 + 单一 state 对象；`profile-text` 分支做定点更新而非整页 `render()`。
+  - **进度（部分）**：AI 与个人配置两个面板的全部状态已移入 `src/settings/controllers/{ai,profile}.ts`，**8 个**模块级 `let` 消失、并补上 25 个用例（见 §0.1 #51/#52）。仍未动的是 `settings` 本身、`message`/`messageKind`/`recordingBossKey`/`activeSettingsPage`/`settingsDirty`，以及 `profile-text`"改了不重渲染"导致旧预览仍在屏幕上的问题（§4-8 最后一段）——后者是**行为变更**，需要与实机回归一起做。
 
 ### 4-9 【中】复制反馈定时器写给已脱离文档的节点
 

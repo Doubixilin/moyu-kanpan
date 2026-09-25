@@ -20,9 +20,21 @@ describe("settings renderer build contract", () => {
     for (const emitted of [
       "src/settings/views.ts",
       "src/settings/fields.ts",
+      "src/settings/controllers/ports.ts",
+      "src/settings/controllers/ai.ts",
+      "src/settings/controllers/bossKey.ts",
+      "src/settings/controllers/profile.ts",
       "src/presentation/format.ts"
     ]) {
       assert.ok(builder.includes(emitted), `${emitted} 未加入 build-renderer 的编译清单`);
+    }
+    // 控制器必须由渲染器以值导入（否则它们只是死代码，拆分等于没做）。
+    for (const controller of [
+      "controllers/ai.js",
+      "controllers/bossKey.js",
+      "controllers/profile.js"
+    ]) {
+      assert.match(entry, new RegExp(controller.replace(/[/.]/g, "\\$&")));
     }
     // 页面标签与设置页样式类在 §4-5 拆分后位于 views.ts（纯视图构造函数）。
     const views = await readFile(path.join(root, "src", "settings", "views.ts"), "utf8");

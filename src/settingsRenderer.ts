@@ -1,8 +1,13 @@
 import { DEFAULT_BOSS_KEY_ACCELERATOR, parseBossKeyAccelerator } from "./shortcut.js";
-import type { AiRuntimeStatus } from "./domain/types";
 import type { HoldingAlertRules, QuoteField, TabType, UserSettings } from "./config";
-import type { ProfileImportMode, ProfilePreview } from "./settings/profile";
 import { escapeAttr, escapeHtml } from "./presentation/format.js";
+import { AiSettingsController } from "./settings/controllers/ai.js";
+import {
+  bossKeyCaptureOutcome,
+  displayBossKey,
+  type KeyEventLike
+} from "./settings/controllers/bossKey.js";
+import { ProfileImportController } from "./settings/controllers/profile.js";
 import {
   HOLDING_ALERT_NUMBER_FIELDS,
   HOLDING_ROW_FIELDS,
@@ -24,7 +29,8 @@ import {
   renderSettingsNavigation,
   renderTabSetting,
   renderWatchItem,
-  settingsPageClass
+  settingsPageClass,
+  type SettingsPage
 } from "./settings/views.js";
 
 const quoteFields: Array<{ value: QuoteField; label: string }> = [
@@ -40,7 +46,6 @@ const quoteFields: Array<{ value: QuoteField; label: string }> = [
   { value: "mainInflow", label: "主力净流入" }
 ];
 
-type SettingsPage = "general" | "portfolio" | "quotes" | "news-ai" | "data";
 const tabTypeLabels: Record<TabType, string> = {
   holdings: "持仓页",
   watchlist: "自选页",
@@ -54,16 +59,36 @@ let settings: UserSettings | null = null;
 let message = "";
 let messageKind: "ok" | "error" | "" = "";
 let recordingBossKey = false;
-let aiStatus: AiRuntimeStatus | null = null;
-let pendingAiApiKey = "";
-let aiBusy = false;
-let profileText = "";
-let profileMode: ProfileImportMode = "merge";
-let profilePreview: ProfilePreview | null = null;
-let profileBusy = false;
-let hasProfileBackup = false;
 let activeSettingsPage: SettingsPage = "general";
 let settingsDirty = false;
+
+// 三个面板的状态与异步流程搬到 `settings/controllers/`：那里不读 DOM、不读模块级变量，
+// 只通过端口回调回来，因此可以单测（此前这些逻辑在这个文件里完全没有测试）。
+const ai = new AiSettingsController({
+  ipc: () => window.floatingStock ?? null,
+  render,
+  notify: showMessage,
+  clearMessage: () => {
+    message = "";
+    messageKind = "";
+  }
+});
+
+const profile = new ProfileImportController({
+  ipc: () => window.floatingStock ?? null,
+  confirm: (text) => window.confirm(text),
+  render,
+  notify: showMessage,
+  clearMessage: () => {
+    message = "";
+    messageKind = "";
+  },
+  applySettings: (next, backupCreated) => {
+    settings = next;
+    settingsDirty = false;
+    if (backupCreated) profile.hasBackup = true;
+  }
+});
 
 const root = document.getElementById("settings-root");
 if (!root) throw new Error("Missing #settings-root");
@@ -96,11 +121,11 @@ function render(): void {
 
       ${renderProfilePanel({
         activePage: activeSettingsPage,
-        preview: profilePreview,
-        hasProfileBackup,
-        mode: profileMode,
-        text: profileText,
-        busy: profileBusy
+        preview: profile.preview,
+        hasProfileBackup: profile.hasBackup,
+        mode: profile.mode,
+        text: profile.text,
+        busy: profile.busy
       })}
 
       <section class="panel ${settingsPageClass("general", activeSettingsPage)}">
@@ -302,7 +327,7 @@ function render(): void {
             <h2>AI 快速分析</h2>
             <p>DeepSeek Flash 只分析公开新闻；数量、成本、账户和交易规则不会发送。</p>
           </div>
-          <span class="ai-state ${escapeAttr(aiStatus?.state ?? "unconfigured")}">${escapeHtml(aiStatusLabel())}</span>
+          <span class="ai-state ${escapeAttr(ai.status?.state ?? "unconfigured")}">${escapeHtml(ai.statusLabel(current))}</span>
         </div>
         <div class="ai-toggle-row">
           <label class="check-card">
@@ -315,12 +340,12 @@ function render(): void {
           <label><span>模型</span><input data-setting="ai-model" maxlength="100" value="${escapeAttr(settings.ai.model)}" placeholder="deepseek-v4-flash" /></label>
           <label class="ai-base-url"><span>API 地址</span><input data-setting="ai-base-url" maxlength="300" value="${escapeAttr(settings.ai.baseUrl)}" placeholder="https://api.deepseek.com" /></label>
           <label><span>超时（秒）</span><input data-setting="ai-timeout" type="number" min="5" max="120" step="1" value="${settings.ai.timeoutSeconds}" /></label>
-          <label class="ai-key-field"><span>API Key</span><input data-setting="ai-api-key" type="password" autocomplete="new-password" value="${escapeAttr(pendingAiApiKey)}" placeholder="${aiKeyPlaceholder()}" /></label>
+          <label class="ai-key-field"><span>API Key</span><input data-setting="ai-api-key" type="password" autocomplete="new-password" value="${escapeAttr(ai.pendingApiKey)}" placeholder="${ai.keyPlaceholder()}" /></label>
         </div>
         <div class="ai-actions">
-          <button type="button" data-action="test-ai" ${aiBusy ? "disabled" : ""}>${aiBusy ? "测试中…" : "测试连接"}</button>
-          <button type="button" data-action="clear-ai-key" class="danger" ${aiStatus?.credentialSource !== "secure" || aiBusy ? "disabled" : ""}>清除 API Key</button>
-          <span>${escapeHtml(aiStatus?.message ?? "正在读取安全存储状态…")}</span>
+          <button type="button" data-action="test-ai" ${ai.busy ? "disabled" : ""}>${ai.busy ? "测试中…" : "测试连接"}</button>
+          <button type="button" data-action="clear-ai-key" class="danger" ${ai.status?.credentialSource !== "secure" || ai.busy ? "disabled" : ""}>清除 API Key</button>
+          <span>${escapeHtml(ai.status?.message ?? "正在读取安全存储状态…")}</span>
         </div>
         <p class="ai-privacy-note">模型仅接收新闻标题、摘要、来源、时间和新闻自身包含的公开代码；不会接收完整持仓组合。DeepSeek 模式固定关闭深度思考并要求 JSON 输出。</p>
       </section>
@@ -434,25 +459,23 @@ function handleFormChange(event: Event): void {
 
   // 这三个字段改的是渲染层自身的状态（草稿文本/模式/文件），不属于 settings。
   if (setting === "profile-text") {
-    profileText = target.value;
-    profilePreview = null;
+    profile.setText(target.value);
     return;
   }
   // API Key 不写入 settings（由主进程用系统安全存储加密），只暂存在渲染层。
   if (setting === "ai-api-key") {
-    pendingAiApiKey = target.value.slice(0, 2_000);
+    ai.setPendingApiKey(target.value);
     settingsDirty = true;
     return;
   }
   if (setting === "profile-mode") {
-    profileMode = target.value === "replace" ? "replace" : "merge";
-    profilePreview = null;
+    profile.setMode(target.value);
     if (event.type === "change") render();
     return;
   }
   if (setting === "profile-file") {
     const file = (target as HTMLInputElement).files?.[0];
-    if (file) void loadProfileFile(file);
+    if (file) void profile.readFile(file);
     return;
   }
 
@@ -546,36 +569,35 @@ async function handleClick(event: Event): Promise<void> {
     return;
   }
   if (action === "test-ai") {
-    await testAiSettings();
+    await ai.test(settings);
     return;
   }
   if (action === "clear-ai-key") {
-    await clearAiCredential();
+    await ai.clearCredential();
     return;
   }
   if (action === "copy-profile-prompt") {
-    await copyProfilePrompt();
+    await profile.copyPrompt();
     return;
   }
   if (action === "copy-profile-export") {
-    await copyProfileExport();
+    await profile.copyExport();
     return;
   }
   if (action === "preview-profile") {
-    await previewPortableProfile();
+    await profile.previewDiff();
     return;
   }
   if (action === "apply-profile") {
-    await applyPortableProfile();
+    await profile.apply();
     return;
   }
   if (action === "restore-profile") {
-    await restorePortableProfile();
+    await profile.restore();
     return;
   }
   if (action === "clear-profile") {
-    profileText = "";
-    profilePreview = null;
+    profile.clear();
     render();
     return;
   }
@@ -713,115 +735,6 @@ function isSettingsPage(value: string | undefined): value is SettingsPage {
   );
 }
 
-async function loadProfileFile(file: File): Promise<void> {
-  if (file.size > 2_000_000) {
-    showMessage("配置包不能超过 2MB", "error");
-    return;
-  }
-  try {
-    profileText = await file.text();
-    profilePreview = null;
-    showMessage(`已读取 ${file.name}，请预览差异`, "ok");
-  } catch (error) {
-    showMessage(error instanceof Error ? error.message : String(error), "error");
-  }
-}
-
-async function copyProfilePrompt(): Promise<void> {
-  try {
-    const result = await window.floatingStock?.copyProfilePrompt();
-    showMessage(result ?? "已复制配置包提示词", "ok");
-  } catch (error) {
-    showMessage(error instanceof Error ? error.message : String(error), "error");
-  }
-}
-
-async function copyProfileExport(): Promise<void> {
-  try {
-    const result = await window.floatingStock?.copyProfileExport();
-    showMessage(result ?? "已复制当前配置包", "ok");
-  } catch (error) {
-    showMessage(error instanceof Error ? error.message : String(error), "error");
-  }
-}
-
-async function previewPortableProfile(): Promise<void> {
-  if (!window.floatingStock || !profileText.trim()) return;
-  profileBusy = true;
-  render();
-  try {
-    profilePreview = await window.floatingStock.previewProfile({
-      text: profileText,
-      mode: profileMode
-    });
-    message = profilePreview.valid
-      ? profilePreview.hasChanges
-        ? "配置包校验通过，请核对差异后确认导入"
-        : "配置包与当前设置没有差异"
-      : "配置包存在错误，不会应用";
-    messageKind = profilePreview.valid ? "ok" : "error";
-  } catch (error) {
-    profilePreview = null;
-    message = error instanceof Error ? error.message : String(error);
-    messageKind = "error";
-  } finally {
-    profileBusy = false;
-    render();
-  }
-}
-
-async function applyPortableProfile(): Promise<void> {
-  if (!window.floatingStock || !profilePreview?.valid || !profilePreview.hasChanges) return;
-  if (
-    profileMode === "replace" &&
-    !window.confirm("确认按预览内容替换明确提供的持仓/自选？导入前会自动备份。")
-  )
-    return;
-  profileBusy = true;
-  render();
-  try {
-    const result = await window.floatingStock.applyProfile({
-      text: profileText,
-      mode: profileMode
-    });
-    settings = result.settings;
-    settingsDirty = false;
-    hasProfileBackup = result.backupCreated || hasProfileBackup;
-    profileText = "";
-    profilePreview = null;
-    message = result.backupCreated
-      ? "配置已导入并进入影子模式；已保存导入前备份"
-      : "配置已导入并进入影子模式";
-    messageKind = "ok";
-  } catch (error) {
-    message = error instanceof Error ? error.message : String(error);
-    messageKind = "error";
-  } finally {
-    profileBusy = false;
-    render();
-  }
-}
-
-async function restorePortableProfile(): Promise<void> {
-  if (!window.floatingStock || !hasProfileBackup) return;
-  if (!window.confirm("确认恢复到上次导入前的配置？")) return;
-  profileBusy = true;
-  render();
-  try {
-    settings = await window.floatingStock.restoreProfileBackup();
-    settingsDirty = false;
-    profilePreview = null;
-    message = "已恢复上次导入前配置";
-    messageKind = "ok";
-  } catch (error) {
-    message = error instanceof Error ? error.message : String(error);
-    messageKind = "error";
-  } finally {
-    profileBusy = false;
-    render();
-  }
-}
-
 function addStock(): void {
   if (!settings) return;
   const codeInput = document.getElementById("new-code") as HTMLInputElement | null;
@@ -934,42 +847,6 @@ function addTab(): void {
   render();
 }
 
-async function testAiSettings(): Promise<void> {
-  if (!settings || !window.floatingStock || aiBusy) return;
-  aiBusy = true;
-  message = "";
-  messageKind = "";
-  render();
-  try {
-    aiStatus = await window.floatingStock.testAiConnection({
-      ai: { ...settings.ai },
-      ...(pendingAiApiKey.trim() ? { apiKey: pendingAiApiKey.trim() } : {})
-    });
-    showMessage(aiStatus.message, aiStatus.state === "success" ? "ok" : "error");
-  } catch (error) {
-    showMessage(error instanceof Error ? error.message : String(error), "error");
-  } finally {
-    aiBusy = false;
-    render();
-  }
-}
-
-async function clearAiCredential(): Promise<void> {
-  if (!window.floatingStock || aiBusy) return;
-  aiBusy = true;
-  render();
-  try {
-    aiStatus = await window.floatingStock.clearAiApiKey();
-    pendingAiApiKey = "";
-    showMessage(aiStatus.message, "ok");
-  } catch (error) {
-    showMessage(error instanceof Error ? error.message : String(error), "error");
-  } finally {
-    aiBusy = false;
-    render();
-  }
-}
-
 async function save(): Promise<void> {
   if (!settings || !window.floatingStock) return;
   if (settings.quotes.fields.length === 0) {
@@ -995,12 +872,7 @@ async function save(): Promise<void> {
     setSaving(true);
     settings = await window.floatingStock.saveSettings(settings);
     settingsDirty = false;
-    if (pendingAiApiKey.trim()) {
-      aiStatus = await window.floatingStock.setAiApiKey(pendingAiApiKey.trim());
-      pendingAiApiKey = "";
-    } else {
-      aiStatus = await window.floatingStock.getAiStatus();
-    }
+    await ai.syncAfterSave();
     showMessage("设置已保存，悬浮窗正在刷新", "ok");
   } catch (error) {
     showMessage(error instanceof Error ? error.message : String(error), "error");
@@ -1014,105 +886,25 @@ function handleBossKeyCapture(event: KeyboardEvent): void {
   event.preventDefault();
   event.stopPropagation();
 
-  if (event.key === "Escape") {
+  // 按键映射是纯逻辑，放在 controllers/bossKey.ts 里（那里可以脱离 DOM 单测）。
+  const outcome = bossKeyCaptureOutcome(event as KeyEventLike);
+  if (outcome.kind === "modifier") return;
+  if (outcome.kind === "cancel") {
     recordingBossKey = false;
-    showMessage("已取消老板键录制", "ok");
+    showMessage(outcome.message, "ok");
     return;
   }
-  if (
-    [
-      "ControlLeft",
-      "ControlRight",
-      "AltLeft",
-      "AltRight",
-      "ShiftLeft",
-      "ShiftRight",
-      "MetaLeft",
-      "MetaRight"
-    ].includes(event.code)
-  ) {
-    return;
-  }
-
-  const accelerator = acceleratorFromKeyboardEvent(event);
-  if (!accelerator) {
-    showMessage("该按键不受支持或属于危险组合，请换一个", "error");
+  if (outcome.kind === "unsupported") {
+    // 继续保持录制状态，让用户直接换一个键重试。
+    showMessage(outcome.message, "error");
     focusBossKeyRecorder();
     return;
   }
 
-  settings.window.bossKeyAccelerator = accelerator;
+  settings.window.bossKeyAccelerator = outcome.accelerator;
   settingsDirty = true;
   recordingBossKey = false;
-  showMessage("已记录 " + displayBossKey(accelerator) + "，保存后生效", "ok");
-}
-
-function acceleratorFromKeyboardEvent(event: KeyboardEvent): string | null {
-  const key = keyFromKeyboardEvent(event);
-  if (!key) return null;
-
-  const parts: string[] = [];
-  if (event.ctrlKey) parts.push("CommandOrControl");
-  if (event.altKey) parts.push("Alt");
-  if (event.shiftKey) parts.push("Shift");
-  if (event.metaKey) parts.push("Super");
-  parts.push(key);
-  return parseBossKeyAccelerator(parts.join("+"));
-}
-
-function keyFromKeyboardEvent(event: KeyboardEvent): string {
-  if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3);
-  if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5);
-  if (/^F(?:[1-9]|1\d|2[0-4])$/.test(event.code)) return event.code;
-  if (/^Numpad[0-9]$/.test(event.code)) return "num" + event.code.slice(6);
-
-  const keys: Record<string, string> = {
-    Space: "Space",
-    Tab: "Tab",
-    CapsLock: "Capslock",
-    NumLock: "Numlock",
-    ScrollLock: "Scrolllock",
-    Backspace: "Backspace",
-    Delete: "Delete",
-    Insert: "Insert",
-    Enter: "Enter",
-    ArrowUp: "Up",
-    ArrowDown: "Down",
-    ArrowLeft: "Left",
-    ArrowRight: "Right",
-    Home: "Home",
-    End: "End",
-    PageUp: "PageUp",
-    PageDown: "PageDown",
-    PrintScreen: "PrintScreen",
-    NumpadDecimal: "numdec",
-    NumpadAdd: "numadd",
-    NumpadSubtract: "numsub",
-    NumpadMultiply: "nummult",
-    NumpadDivide: "numdiv",
-    Backquote: String.fromCharCode(96),
-    Minus: "-",
-    Equal: "=",
-    BracketLeft: "[",
-    BracketRight: "]",
-    Backslash: "\\",
-    Semicolon: ";",
-    Quote: '"',
-    Comma: ",",
-    Period: ".",
-    Slash: "/",
-    AudioVolumeUp: "VolumeUp",
-    AudioVolumeDown: "VolumeDown",
-    AudioVolumeMute: "VolumeMute",
-    MediaTrackNext: "MediaNextTrack",
-    MediaTrackPrevious: "MediaPreviousTrack",
-    MediaStop: "MediaStop",
-    MediaPlayPause: "MediaPlayPause"
-  };
-  return keys[event.code] ?? "";
-}
-function displayBossKey(accelerator: string): string {
-  return accelerator.replace("CommandOrControl", "Ctrl").replace("Super", "Win");
+  showMessage(outcome.message, "ok");
 }
 
 function focusBossKeyRecorder(): void {
@@ -1163,23 +955,6 @@ function showMessage(value: string, kind: "ok" | "error"): void {
   render();
 }
 
-function aiKeyPlaceholder(): string {
-  if (aiStatus?.credentialSource === "secure") return "已安全保存；留空表示不变";
-  if (aiStatus?.credentialSource === "environment") return "环境变量已配置；输入可改用安全存储";
-  return "输入后由系统安全存储加密";
-}
-
-function aiStatusLabel(): string {
-  if (!aiStatus) return "读取中";
-  if (aiStatus.state === "testing") return "测试中";
-  if (aiStatus.state === "success") return "连接正常";
-  if (aiStatus.state === "error") return "需要处理";
-  if (aiStatus.configured && !settings?.ai.enabled) return "已配置 · 未启用";
-  if (aiStatus.configured)
-    return aiStatus.credentialSource === "secure" ? "已安全配置" : "环境变量";
-  return "本地规则";
-}
-
 render();
 void Promise.all([
   window.floatingStock?.getSettings(),
@@ -1188,8 +963,8 @@ void Promise.all([
 ])
   .then(([nextSettings, nextAiStatus, nextHasBackup]) => {
     if (nextSettings) settings = nextSettings;
-    if (nextAiStatus) aiStatus = nextAiStatus;
-    hasProfileBackup = nextHasBackup === true;
+    if (nextAiStatus) ai.status = nextAiStatus;
+    profile.hasBackup = nextHasBackup === true;
     render();
   })
   .catch((error) => showMessage(error instanceof Error ? error.message : String(error), "error"));
@@ -1199,6 +974,6 @@ window.floatingStock?.onSettings((value) => {
   render();
 });
 window.floatingStock?.onAiStatus((value) => {
-  aiStatus = value;
+  ai.status = value;
   render();
 });
