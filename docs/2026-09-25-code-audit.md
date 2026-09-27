@@ -159,7 +159,9 @@
 
 **尚未处理**（按报告路线图，需要更大改动或人工验证）：
 
-- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分三步已完成（1398 → 979 行），§4-6（整页重渲染丢焦点/收面板）已修（#59），§4-8 里配置导入面板的"UI 说谎"已修（#60），§4-7 的共享格式化层已完成两批（#46/#57），§4-10 已建调色板护栏与首层 token（#61）。**剩下的都需要设计/产品确认**（见下），并建议在实机上做一次视觉回归。
+- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分三步已完成（1398 → 979 行），§4-6（整页重渲染丢焦点/收面板）已修（#59），§4-8 里配置导入面板的"UI 说谎"已修（#60），§4-7 的共享格式化层已完成两批（#46/#57），§4-10 已建调色板护栏与首层 token（#61）。**仍是代码工作、尚未做的两块**：
+  - **§4-2（高）主悬浮窗每次刷新全量重建 DOM**：`renderer.ts` 的 `render()` 每次快照推送都重建整个部件（前台约 3 秒一次、上千节点），后果与刚修完的 §4-6 同类（焦点、文本选区、IME 组合、`<details>` 展开态、标签溢出 `<select>` 的展开状态全被打断）。修复方向：header/footer/标签栏只渲染一次，仅重建 `.page-body` 并用 `pageKey` 守卫。**验证手段已就绪**：`smoke:electron` 可以在隐藏窗口里推两次快照并断言焦点/展开态是否存活（与 §4-6 同一套做法）。
+  - **§4-4（高）边界无运行时校验**：`preload.cts` 的 30 个方法全是 `as` 断言，`invoke` 返回 `any`；主进程一旦改字段名，`renderFeedStatus` 会把 `undefined` 当成"一切正常"，`renderQuoteQuality` 读 `quality.reasons.length` 直接抛错。修复方向：`parseSnapshot(unknown)` / `normalizePublicSnapshot(unknown)`（后者与已有 `normalizeExcelCustomSheet` 对称）——**纯函数、可单测**。
 - **Phase F（GUI 相关，最后）**：§7-1 Electron 已升到 **44.4.5**（Chromium 152 / Node 24.21），并新增 `npm run smoke:electron`（隐藏窗口跑 **20 项**运行时 API + 交互检查，本次全通过，见 §0.1 #58/#59/#60）。**仍需人工在实机过一遍**：透明度/圆角观感、托盘菜单交互、老板键跨应用隐藏/呼出、点击穿透手感、通知投递，以及 `npm run package:win` 的 Electron 44 打包与安装。
 - **需要产品/设计确认后才能继续的 3 项**（都会改变用户看到的颜色或文字，因此没有静默改）：
   1. **涨跌语义色统一**（§4-10）：`styles.css` 用 `#ff6b6b`/`#4ecdc4`、`quick.css` 用 `#ad3b38`/`#287a52`、Excel 用 `#107c41`；另外 `data-theme="stealth"` 只作用于悬浮窗（`quickRenderer` 从不设置 `dataset.theme`）。
