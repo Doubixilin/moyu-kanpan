@@ -16,6 +16,7 @@ await compileTypeScript("src/workRenderer.ts", "workweb.js");
 await compileTypeScript("src/presentation/format.ts", "presentation/format.js");
 await compileTypeScript("src/settings/fields.ts", "settings/fields.js");
 await compileTypeScript("src/settings/views.ts", "settings/views.js");
+await compileTypeScript("src/settings/uiState.ts", "settings/uiState.js");
 await compileTypeScript("src/settings/controllers/ports.ts", "settings/controllers/ports.js");
 await compileTypeScript("src/settings/controllers/ai.ts", "settings/controllers/ai.js");
 await compileTypeScript("src/settings/controllers/bossKey.ts", "settings/controllers/bossKey.js");

@@ -32,6 +32,7 @@ import {
   settingsPageClass,
   type SettingsPage
 } from "./settings/views.js";
+import { captureUiState, restoreUiState } from "./settings/uiState.js";
 
 const quoteFields: Array<{ value: QuoteField; label: string }> = [
   { value: "price", label: "当前价" },
@@ -104,6 +105,9 @@ function render(): void {
   // 捕获为局部常量：`settings` 是模块级变量，在下面的箭头回调里 TS 无法保留非空收窄。
   const current = settings;
   const visibleTabs = current.tabs.filter((tab) => tab.visible);
+  // 整页重建前先记下界面状态（展开的 details / 焦点与光标 / 滚动位置），重建后放回去。
+  // 不做这一步时，任何一次必须重建的操作都会让用户正在编辑的输入框失焦、展开的面板收起（§4-6）。
+  const uiState = captureUiState(rootElement);
   rootElement.innerHTML = `
     <main class="settings-shell">
       <header class="settings-header">
@@ -115,7 +119,11 @@ function render(): void {
         <button class="primary" data-action="save">保存设置</button>
       </header>
 
-      ${message ? `<div class="message ${messageKind}">${escapeHtml(message)}</div>` : ""}
+      <div id="settings-message" role="status" aria-live="polite" ${message ? "" : "hidden"}>${
+        message
+          ? `<div class="message ${escapeHtml(messageKind)}">${escapeHtml(message)}</div>`
+          : ""
+      }</div>
 
       ${renderSettingsNavigation(activeSettingsPage)}
 
@@ -403,6 +411,7 @@ function render(): void {
       </footer>
     </main>
   `;
+  restoreUiState(rootElement, uiState);
 }
 
 rootElement.addEventListener("input", handleFormChange);
@@ -949,10 +958,30 @@ function setSaving(saving: boolean): void {
   });
 }
 
+/**
+ * 只更新提示区，不整页重渲染（§4-6）。
+ *
+ * 提示是最高频的反馈（保存、清空规则、字段超限…）。以前每次提示都走整页重建，
+ * 于是"点一下看看结果"会连带丢掉焦点、光标和展开的面板——用户看到的是自己正在编辑的
+ * 输入框突然失焦。提示区现在是模板里的固定槽位，因此可以原地替换。
+ */
+function updateMessage(): void {
+  const slot = document.getElementById("settings-message");
+  if (!slot) {
+    // 首屏（settings 尚未加载）时还没有这个槽位，退化为整页渲染。
+    render();
+    return;
+  }
+  slot.innerHTML = message
+    ? `<div class="message ${escapeHtml(messageKind)}">${escapeHtml(message)}</div>`
+    : "";
+  slot.hidden = !message;
+}
+
 function showMessage(value: string, kind: "ok" | "error"): void {
   message = value;
   messageKind = kind;
-  render();
+  updateMessage();
 }
 
 render();

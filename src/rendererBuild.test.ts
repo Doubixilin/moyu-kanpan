@@ -20,6 +20,7 @@ describe("settings renderer build contract", () => {
     for (const emitted of [
       "src/settings/views.ts",
       "src/settings/fields.ts",
+      "src/settings/uiState.ts",
       "src/settings/controllers/ports.ts",
       "src/settings/controllers/ai.ts",
       "src/settings/controllers/bossKey.ts",

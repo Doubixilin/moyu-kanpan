@@ -133,6 +133,9 @@
 | 56 | §6-4 ② 把 `main.ts` 纯逻辑抽成可测模块 | 新增 `src/domain/newsSelection.ts`（`selectRelevantNews` 相关性标注 + `presentNews` 展示筛选）、`src/domain/alertSeverity.ts`（`ALERT_SEVERITY` 权重表 + `mostSevereAlert`）、`src/domain/aiTestRequest.ts`（AI 测试参数校验）、`src/domain/errors.ts`（`errorMessage`/`upsertError`）；`domain/market.ts` 增 `resolveMarketInstrument`、`settings/profile.ts` 增 `parseProfileRequest`、`config.ts` 增 `parseLocalPreviewPort`。顺带消掉 `settings/controllers/ports.ts` 里同语义的 `describeError`（改为指向 `domain/errors.ts`），并把 `domain/errors.ts` 加入渲染器编译清单与构建契约断言 | `electron/main.ts` 2006 → 1990 行（其余为薄包装），但其中约 **110 行逻辑第一次有了直接测试**：新增 `newsSelection.test.ts`（5 个：标题/摘要匹配、别名与行情名、短关键字与未生效证券、`watchlist_related` 才过滤、`important` 只留有用非低优先级）、`alertSeverity.test.ts`（3 个）、`aiTestRequest.test.ts`（5 个）、`errors.test.ts`（4 个）；扩展 `market.test.ts`/`profile.test.ts`/`config.test.ts` 各 1 组。总测试 248 → **268**，行覆盖率 91.95% → **92.2%**，分支 75.85% → **76.53%** |
 | 57 | §4-7 共享格式化层（时间 / 涨跌方向 / 百分比 / 固定小数） | `presentation/format.ts` 新增 `formatClockTime`、`formatClockTimeWithSeconds`（复用同一个 `Intl` 实例、显式 `hour12: false`）、`changeDirection`（`up/down/flat`）、`positiveNegativeClass`（工作网页与 Excel 用的 `positive/negative/空串`）、`formatFixedOrDash`、`formatSignedPercent`、`DASH`；并迁移 `renderer.ts`（`formatTime`/`formatFeedTime`/`formatNumber`/`formatPercent`/`numberDirection`/`quoteDirection`）、`quickRenderer.ts`（删掉全部 5 个本地包装）、`workRenderer.ts`、`excelRenderer.ts`（`formatStatusTime`/`formatChartNumber`）、`presentation/excelWorkbook.ts`（`formatTime`/`percentOrDash`） | 时间副本 **6 → 1**、涨跌方向 **5 → 1**、带符号百分比 **4 → 1**。行为等价性用真实输出核对过：`toLocaleTimeString("zh-CN", {hour, minute})` 与 `Intl.DateTimeFormat(…, {hour12: false})` 在 0/1/9/12/13/23 点**逐字相同**（Node 24 / Asia/Shanghai），所以时间显示零变化；`formatFixedOrDash` 只统一缺失值占位。新增 `src/presentation/format.test.ts`（5 个用例，用本地时间构造因此不受 CI 时区影响）；构建后 `dist/assets/presentation/format.js` 导出新函数，`quick.js`/`workweb.js`/`excel.js` 三个包都改为 import 它，包内 `toLocaleTimeString` 归零（grep 验证） |
 | 58 | **Phase F：§7-1 Electron 39 → 44** | `package.json`：`electron ^39.2.7` → **`^44.4.5`**（实装 44.4.5 = Chromium **152** / Node **24.21.0**，Electron 39 的 39.8.10 是 Chromium 142 / Node 22.20）。升级暴露一处**真实的 API 变更**：Electron 44 把 `clipboard` 对齐 W3C `navigator.clipboard`，`writeText` 变成**异步**，`news:copyContext`/`profile:copyPrompt`/`profile:copyExport` 三个 handler 因此改为 `async` + `await`（`@typescript-eslint/no-floating-promises` 直接报出来了）；`eslint.config.mjs` 把 `scripts/**/*.cjs` 纳入 node globals 段。新增 **`scripts/smoke-electron-api.cjs`** + `npm run smoke:electron`：用 `show:false` 的隐藏窗口把升级后真正依赖的 Electron 能力跑一遍（**不会把窗口弹到用户桌面上**） | 实测输出（`exit=0`，**13/13 通过**）：`electron 44.4.5 / node 24.21.0 / chrome 152.0.7977.130`；`screen` 工作区 1440×852；`safeStorage` 加密往返一致；`node:sqlite` insert/select 正常（Electron 39 的 Node 22 只是实验性支持，现在更稳）；默认老板键 `CommandOrControl+Alt+Space` 注册/注销成功；`Tray` + 上下文菜单创建/销毁正常；透明+无边框+`alwaysOnTop("screen-saver")`+点击穿透+锁定组合可用（`visible=false alwaysOnTop=true`）；**5 个渲染器全部在 Chromium 152 下执行首屏**（设置页 43 个 `data-action` 控件、悬浮窗/速览/月度工作台/项目工作网页根节点均有子元素），且 `contextBridge` 正常暴露 `floatingStock.saveSettings`。另有 `npm run verify`（273 测试）与 `smoke:news`/`smoke:profile` 通过 |
+| 59 | §4-6 整页重渲染的连带 bug（焦点/光标/面板收起） | 两处改动：① **提示改为定点更新**——模板里新增固定槽位 `<div id="settings-message" role="status" aria-live="polite">`，`showMessage` 改成 `updateMessage()` 只替换槽位内容（首屏尚未渲染时退化为整页渲染）。提示是最高频的反馈（保存、清空规则、字段超限、导入结果），此前每次都触发整页重建；② **整页重建时保留界面状态**——新增 `src/settings/uiState.ts`（`uiKey`/`captureUiState`/`restoreUiState`），用 `data-setting`/`data-action`+行索引拼稳定 key，在 `render()` 换 innerHTML 前后搬运"哪些 `details` 开着、焦点在哪个控件、光标/选区位置、滚动位置"（`focus({preventScroll:true})` 后再恢复滚动；number/checkbox 不支持 `setSelectionRange` 时只恢复焦点） | **先复现再修复**：把新的交互检查加进 `npm run smoke:electron`（隐藏窗口 + 真实设置页 + 真实事件），修复前实测 **FAIL**：`提示类操作…→ 展开的 details 被收起`、`必要整页重渲染…→ 重渲染后焦点丢失，activeElement=BODY`；修复后同两条 **PASS**（`焦点/光标/面板 open/提示均保留`、`focus=holding-note caret=1`）。冒烟总数 13 → **18 项，全部通过**；`npm run verify`（273 测试）与 `smoke:news`/`smoke:profile` 通过。顺带修掉一个诊断坑：隐藏窗口里 `display:none` 分区中的输入框无法获得焦点，冒烟因此先切到"持仓与提醒"分类再断言 |
+
+**§4-6 仍需实机确认的部分**：`window.scrollTo` 与页面切换后的滚动位置在实际窗口里的手感（本冒烟只验证"值被保留"），以及隐藏窗口与真实窗口在焦点行为上的差异。
 
 **§7-1 仍需实机确认的部分（无法在无 GUI 环境下自动验证，且本次有意不弹窗）**：透明/圆角的实际观感、托盘图标与菜单交互、老板键在其他应用前台时隐藏/呼出的真实行为、点击穿透后的鼠标手感、系统通知投递、以及 `npm run package:win`（electron-builder + NSIS）在 Electron 44 下的打包与安装。建议在实机上按 `npm run dev` → 逐项过一遍上面这份清单。
 
@@ -152,7 +155,7 @@
 
 **尚未处理**（按报告路线图，需要更大改动或人工验证）：
 
-- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分已完成 §4-5 三步（字段表 → 视图 → 控制器），文件从 1398 行降到 **979 行**；剩下 `handleClick`（约 177 行、18 个动作）、`render()` 整页模板与 `handleFormChange` 薄壳，这三块本身就是"DOM 定位 + 事件接线"，继续拆的收益低于实机回归风险，暂缓。§4-6（整页重渲染导致焦点/折叠丢失，需改为定点更新）、§4-7 剩余部分（另外 4 个渲染器的时间/数字/涨跌方向/金额压缩共 20 处副本，收敛会**改变显示值**，属行为变更）、§4-8 剩余全局状态、§4-10 的 CSS token 层（`settings.css` 127 处硬编码色值）同样未做，都排在实机回归那一批。
+- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分三步已完成（1398 → 979 行），§4-6（整页重渲染丢焦点/收面板）已修（#59），§4-7 的共享格式化层已完成两批（#46/#57）。剩下：§4-7 里**有意未统一**的三类显示口径（价格精度、`QuoteField` 标签、金额压缩，见下）、§4-8 剩余的模块级状态与 `profile-text`"改了不重渲染导致旧预览仍在屏幕上"、以及 §4-10 的 CSS token 层（`settings.css` 127 处硬编码色值）。
 - **Phase F（GUI 相关，最后）**：§7-1 Electron 已升到 **44.4.5**（Chromium 152 / Node 24.21），并新增 `npm run smoke:electron`（隐藏窗口跑 13 项运行时 API 检查，本次全通过，见 §0.1 #58）。**仍需人工在实机过一遍**：透明度/圆角观感、托盘菜单交互、老板键跨应用隐藏/呼出、点击穿透手感、通知投递，以及 `npm run package:win` 的 Electron 44 打包与安装。
 - **其余未做（有意）**：
   - §9 **S-24**：`docs/marketing/**` 约 2 MB PNG 在 Git 历史里；README 直接引用这些图，改动收益低，保持原样。
@@ -371,10 +374,11 @@
 - 修复（三步，各自可独立发布）：① 抽纯视图构造到 `src/settings/views/*.ts`（零行为变更，约减 350 行）；② 抽 `src/settings/controllers/{ai,profile,bossKey}.ts`，以 `{get, patch, send}` 注入；③ 抽声明式字段表 `src/settings/fields.ts`，把 171 行 dispatcher 变查表（约 40 行）。**先做③**，它会暴露真实状态形状。
   - **进度：① ② ③ 全部完成**（`fields.ts` 340 行 + 205 行测试、`views.ts` 362 行 + 353 行测试、`controllers/**` 4 个模块 + 305 行测试，共 52 个新用例；`settingsRenderer.ts` 1398 → **979 行**，模块级可变全局减少 8 个，见 §0.1 #49/#50/#51/#52）。剩下未拆的是 `handleClick`（177 行/18 动作）、`render()` 整页模板与 `handleFormChange` 薄壳——它们只剩 DOM 定位与事件接线。
 
-### 4-6 【中】`settingsRenderer.ts` 整页重渲染的连带 bug
+### 4-6 【中】`settingsRenderer.ts` 整页重渲染的连带 bug —— 已修复（见 §0.1 #59）
 
 `:81` 的整页重建被约 10 个入口调用（每个 `showMessage` `:1424`、各 busy 开关、7 个 `change` 即重渲染的控件 `:671/:752/:766/:794/:839`）。后果：刚操作的控件焦点/光标丢失；`:520` 的 `<details class="holding-rule-details">` 折叠 → 点击"清空规则"`:957`、"加入持仓"`:1170`、"添加风险组"`:988` 会让用户正在操作的面板收起。作者已意识到焦点问题但只对**一个**控件打了补丁（`focusBossKeyRecorder` `:1379-1381`）。
 > 校准：这**不是**每 tick 发生——`pushSettings` 只在保存流程触发（`main.ts:1655`），`onSettings` 被 `settingsDirty` 正确守卫（`:1489`，这点写得好）。
+- 修复（见 §0.1 #59）：① 提示改成定点更新（模板固定槽位 `#settings-message`，`showMessage` 不再整页重建）——覆盖了原本触发重建的绝大多数入口；② 新增 `src/settings/uiState.ts`，在剩余的必要整页重建前后搬运"展开的 `details` / 焦点 / 光标选区 / 滚动位置"。两条路径都由 `npm run smoke:electron` 的新交互检查看住（修复前实测失败、修复后通过）。
 
 ### 4-7 【中】重复实现：15 类辅助函数，且两个同名 `escapeHtml` 语义不同 —— 第一/二批已修（见 §0.1 #46/#57）
 
@@ -403,7 +407,7 @@
 
 `renderer.ts:1008-1015`：设置 `textContent = "已复制"`，随后 `window.setTimeout(..., 1_500)` **未保存句柄**。下一次 `render()`（`:221`）替换该节点 → 回调写到脱离文档的元素，用户**看不到**提示。修复：按按钮保存句柄并在重渲染时取消。
 
-### 4-10 【中】CSS 无 token 层、含约 24 行死规则
+### 4-10 【中】CSS 无 token 层、含约 24 行死规则 —— 死规则已删（见 §0.1 #48），token 层待做
 
 硬编码 hex：`settings.css` **127**、`workweb.css` 117、`excel.css` 103、`styles.css` 46、`quick.css` 18；`var(--…)` 使用数：`styles.css` 2、`workweb.css` 23、其余三个 **0**。`settings.css` 有 13 个近似灰色承担 4 种用途；5 个页面用了 3 套字体栈。
 **已核实无引用的死规则**：`styles.css:214` `.news-title`、`:864-867` `.news-title`、`:869-872` `.news-summary`、`:912` stealth `.news-summary`、`:1172-1178` `.driver-inference` + `:1180-1182` stealth 覆盖（新闻卡片已改用 `.driver-card`/`.driver-heading`/`.driver-meta`）、`settings.css:153-156` `.code-input`、`:235-239`/`:363` `.split-panel`。
