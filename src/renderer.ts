@@ -276,35 +276,38 @@ function render(next: AppSnapshot): void {
     ? `detail:${marketDetailRequest.kind}:${marketDetailRequest.market}:${marketDetailRequest.code}`
     : tab.id;
 
-  rootElement.innerHTML = `
-    <main class="widget page-${tab.type}">
-      <header class="drag header">
-        <div>
-          <div class="eyebrow">摸鱼看盘</div>
-          <h1>${escapeHtml(pageTitle)}</h1>
-        </div>
-        <div class="controls no-drag" aria-label="窗口工具">
-          <button data-action="hide" title="隐藏到托盘" aria-label="隐藏到托盘">隐</button>
-          <button data-action="theme" title="切换标准/低调模式" aria-label="切换色彩模式">彩</button>
-          <button class="${clickThrough ? "active" : ""}" data-action="click-through" title="${clickThrough ? "点击穿透已开启，可用快捷键关闭" : "开启鼠标点击穿透"}" aria-label="点击穿透" aria-pressed="${clickThrough}">穿</button>
-          <button data-action="settings" title="页面、自选与外观设置" aria-label="打开设置">设</button>
-        </div>
-      </header>
-      ${renderTabBar(next.settings, tab.id)}
-      <section class="page-content">
+  // 外壳（标题栏 / 标签栏 / 页脚）只建一次，之后只改变化的部分：
+  // 整页 innerHTML 替换会打断用户正在展开的标签溢出下拉、丢掉焦点与 :hover（§4-2）。
+  const frame = ensureShell(tab);
+  if (frame.title.textContent !== pageTitle) frame.title.textContent = pageTitle;
+  if (frame.clickThroughButton.getAttribute("aria-pressed") !== String(clickThrough)) {
+    frame.clickThroughButton.classList.toggle("active", clickThrough);
+    frame.clickThroughButton.setAttribute("aria-pressed", String(clickThrough));
+    frame.clickThroughButton.title = clickThrough
+      ? "点击穿透已开启，可用快捷键关闭"
+      : "开启鼠标点击穿透";
+  }
+
+  const signature = tabBarSignature(next.settings, tab.id);
+  if (signature !== frame.tabBarSignature) {
+    frame.tabBar.innerHTML = renderTabBarContent(next.settings, tab.id);
+    frame.tabBarSignature = signature;
+  }
+
+  // 数据区每次推送都重建（价格/新闻本来就在变），但外壳与其中的滚动容器保持稳定。
+  frame.pageContent.innerHTML = `
         ${renderShapeProblem()}
         ${renderRecentAlert(snapshot)}
         ${renderErrors(snapshot.errors)}
         <div class="page-body">
           ${renderPage(tab, next)}
         </div>
-      </section>
-      <footer class="drag footer">
+  `;
+  frame.footer.innerHTML = `
         ${renderFeedStatus("行情", snapshot.feeds.quotes)}
         ${renderFeedStatus("资讯", snapshot.feeds.news)}
-      </footer>
-    </main>
   `;
+
   if (pageKey === lastRenderedPageKey) {
     rootElement.querySelectorAll<HTMLElement>(".scroll-list").forEach((element, index) => {
       const previous = previousScrollTops[index];
@@ -312,6 +315,72 @@ function render(next: AppSnapshot): void {
     });
   }
   lastRenderedPageKey = pageKey;
+}
+
+interface WidgetShell {
+  main: HTMLElement;
+  title: HTMLElement;
+  clickThroughButton: HTMLButtonElement;
+  tabBar: HTMLElement;
+  tabBarSignature: string;
+  pageContent: HTMLElement;
+  footer: HTMLElement;
+}
+
+let shell: WidgetShell | null = null;
+
+/**
+ * 建立或复用部件外壳。
+ *
+ * 页面类型变化（`page-*` 类决定布局与配色）或外壳被替换过时才重建，
+ * 其余情况一律复用同一批 DOM 节点。
+ */
+function ensureShell(tab: TabConfig): WidgetShell {
+  const mainClass = `widget page-${tab.type}`;
+  if (shell && shell.main.isConnected && shell.main.className === mainClass) return shell;
+
+  rootElement.innerHTML = `
+    <main class="${mainClass}">
+      <header class="drag header">
+        <div>
+          <div class="eyebrow">摸鱼看盘</div>
+          <h1></h1>
+        </div>
+        <div class="controls no-drag" aria-label="窗口工具">
+          <button data-action="hide" title="隐藏到托盘" aria-label="隐藏到托盘">隐</button>
+          <button data-action="theme" title="切换标准/低调模式" aria-label="切换色彩模式">彩</button>
+          <button data-action="click-through" title="开启鼠标点击穿透" aria-label="点击穿透" aria-pressed="false">穿</button>
+          <button data-action="settings" title="页面、自选与外观设置" aria-label="打开设置">设</button>
+        </div>
+      </header>
+      <nav class="tabs no-drag" aria-label="看盘页面"></nav>
+      <section class="page-content"></section>
+      <footer class="drag footer"></footer>
+    </main>
+  `;
+
+  const main = rootElement.querySelector<HTMLElement>("main.widget");
+  const title = main?.querySelector<HTMLElement>("h1");
+  const clickThroughButton = main?.querySelector<HTMLButtonElement>(
+    'button[data-action="click-through"]'
+  );
+  const tabBar = main?.querySelector<HTMLElement>("nav.tabs");
+  const pageContent = main?.querySelector<HTMLElement>("section.page-content");
+  const footer = main?.querySelector<HTMLElement>("footer.footer");
+  if (!main || !title || !clickThroughButton || !tabBar || !pageContent || !footer) {
+    throw new Error("部件外壳渲染失败");
+  }
+
+  shell = {
+    main,
+    title,
+    clickThroughButton,
+    tabBar,
+    tabBarSignature: "",
+    pageContent,
+    footer
+  };
+  return shell;
 }
 
 function resolveActiveTab(settings: UserSettings): TabConfig {
@@ -332,14 +401,13 @@ function resolveActiveTab(settings: UserSettings): TabConfig {
   );
 }
 
-function renderTabBar(settings: UserSettings, currentId: string): string {
+/** 标签栏内容（外壳的 `<nav>` 由 `ensureShell` 持有，这里只给内部标记）。 */
+function renderTabBarContent(settings: UserSettings, currentId: string): string {
   const tabs = settings.tabs.filter((tab) => tab.visible).sort((a, b) => a.order - b.order);
   const primary = tabs.slice(0, 4);
   const overflow = tabs.slice(4);
   const overflowActive = overflow.find((tab) => tab.id === currentId);
-
   return `
-    <nav class="tabs no-drag" aria-label="看盘页面">
       ${primary
         .map(
           (tab) => `
@@ -359,8 +427,21 @@ function renderTabBar(settings: UserSettings, currentId: string): string {
       `
           : ""
       }
-    </nav>
   `;
+}
+
+/**
+ * 标签栏结构签名：只有它变化时才重建标签栏。
+ *
+ * 行情每 3 秒推一次，但标签集合基本不变；重建会把用户正在展开的溢出 `<select>`
+ * 和 `:hover` 状态一起打断（审计报告 §4-2）。
+ */
+function tabBarSignature(settings: UserSettings, currentId: string): string {
+  const tabs = settings.tabs
+    .filter((tab) => tab.visible)
+    .sort((a, b) => a.order - b.order)
+    .map((tab) => `${tab.id}:${tab.title}`);
+  return `${tabs.join("|")}|active:${currentId}`;
 }
 
 function renderPage(tab: TabConfig, next: AppSnapshot): string {

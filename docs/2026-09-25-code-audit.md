@@ -137,6 +137,7 @@
 | 60 | §4-8 配置导入面板的"UI 说谎"（比报告描述更严重） | 把依赖草稿的那一块从整页模板里拆成 `renderProfileLiveRegion(state)`（`views.ts`，含三个操作按钮 + 预览结果/占位），模板里给它固定容器 `<div id="profile-live">`；`settingsRenderer.ts` 新增 `updateProfileLiveRegion()`，在 `profile-text` 的 `input` 与 `profile-mode` 的 `change` 上**定点重建**该容器（不再整页重渲染，因此光标不丢） | **先复现再修复**（临时关掉修复后重建、跑同一条冒烟）：`输入草稿后预览/清空按钮立即可用（§4-8）→ FAIL：敲进 JSON 后'预览差异'仍是禁用的，用户无从预览`（连带 `预览成功后按钮进入可用状态 → 预览结果没有渲染`、`改动草稿后…→ 改动前没有预览，检查不成立`）。修复后三条全 **PASS**：`预览/清空按钮已启用`、`预览可见 + 确认导入可用`、`预览已清空 + 确认导入禁用 + 光标保持`。冒烟 18 → **20 项全部通过**；`views.test.ts` 增 1 组用例（`renderProfileLiveRegion` 三种状态）→ 总测试 **274**；`npm run verify` 与 `smoke:news`/`smoke:profile` 通过 |
 | 61 | §4-10 调色板护栏 + 首层 CSS token | ① 新增 `src/presentation/cssPalette.ts`：纯解析器（剥注释后统计 hex/rgb/hsl 字面量、配对 `var(--x)` 的定义与使用、给出热点色）。② 新增 `src/presentation/cssPalette.test.ts`：**去重颜色种类数是"只降不升"的预算**——`styles.css 75 / settings.css 86 / quick.css 15 / excel.css 71 / workweb.css 85`（实测值），任何人再随手加一个近似色都会让 `npm test` 失败并提示先复用或与设计一起收敛；同时断言每个文件里用到的 `var(--x)` 都有定义（拼错的变量会让整条声明静默失效）。③ `settings.css` 顶部建立首层 token：`--text`/`--text-muted`/`--text-faint`/`--surface`/`--surface-subtle`/`--line`/`--on-accent` | 替换 30 处**取值完全一致**的高频字面量（`color: #4f555d`×5、`#777d85`×5、`#8a8f96`×6、`border: 1px solid #d8dbe0`×5、`background: #f8f9fa`×4、`#fff`×5），逐个核对过使用场景（那 6 个 `#8a8f96` 全部用在 `color:`、5 个 `#d8dbe0` 全部用在同一种 border 上），因此**视觉零变化**（token 值与原文一致，替换后文件里只剩定义处）。测试 274 → **282**（解析器 3 个 + 5 个文件预算 + 之前的）；`npm run verify` 与 `smoke:electron`（20/20，5 个页面在真 Chromium 下重新首屏）通过 |
 | 62 | §4-4 IPC 边界无运行时校验（高） | ① `renderer.ts`/`settingsRenderer.ts` 启动时检查 `window.floatingStock`，缺失即渲染可见错误（新增 `.bridge-error`，配色复用既有 alert 色以免动调色板预算），不再永远停在"正在读取设置…"/空部件。② 新增 `src/domain/appSnapshotShape.ts`：`describeAppSnapshotProblem(value)` 按声明式字段表检查渲染层真正会读、且出错会"静默说谎或抛错"的字段（`feeds.quotes` 的 7 个布尔/数字、`settings.*` 容器、`risk.recentEvents`、`market.indices`、`ui.clickThrough`、`ai.state`），返回**第一处**不符的"路径：期望 X，实际 Y"；悬浮窗把这句话直接显示在顶部。刻意选择**报错**而非补默认值——补默认值正好会掩盖审计点名的漂移。③ `normalizePublicSnapshot`/`normalizePublicTrend` 替换 `workRenderer.ts` 的 4 处 `as` 断言（含 `localStorage` 缓存），并区分"数据格式不符"与"访问已失效"两种提示。④ 顺带修构建校验盲区：`verify-electron-build.mjs` 现在对 5 个渲染器入口都做 import 闭包校验 | `appSnapshotShape.test.ts`（6 个：合法快照、非对象、**字段改名精确定位**、按声明顺序报第一处、null 只在该允许处通过、容器类型错误）；`publicSnapshot.test.ts` 增 4 组（骨架拒绝、缺字段修复、坏条目丢弃 + 枚举回退、趋势条目校验）→ 测试 282 → **292**；已实测新护栏有效：从 `build-renderer.mjs` 删掉 `publicSnapshot` 的 emit 行后 `npm run build` 立即报 `Renderer module missing: dist/assets/presentation/publicSnapshot.js imported by dist/assets/workweb.js`（这条盲区原本只有在 `smoke:electron` 报"项目工作网页首屏为空"时才暴露）。`npm run verify` 与四个冒烟通过（`smoke:data` 仍为上游不可达） |
+| 63 | §4-2 主悬浮窗每次刷新全量重建 DOM（高） | `renderer.ts` 引入 `ensureShell(tab)` + `WidgetShell`：`<main class="widget page-*">`/`<header>`/`<nav class="tabs">`/`<section class="page-content">`/`<footer>` 只在**首次或页面类型变化**时创建，之后复用同一批节点；每次推送只 ① 标题变了才写 `h1.textContent`；② 点击穿透按钮的状态变了才改 `class`/`aria-pressed`/`title`；③ 标签栏按**结构签名**（可见标签 id+标题+当前标签）决定是否重建，签名不变时溢出 `<select>` 的节点身份/选中项/展开状态全部保留；数据区（`.page-content` + `.page-body`）照旧每次重建成新内容。原 `renderTabBar`（返回整个 `<nav>`）拆成 `renderTabBarContent`，死代码已删 | **先复现再修复**：`smoke:electron` 新增 3 项主窗口检查——往 `index.html` 推两次真实 `AppSnapshot`（设置、报价、news、`emptyMarketOverview()`、`emptyRiskSnapshot()` 都是真构造器产出的合法载荷），修复前 `行情刷新后标签栏/工具按钮节点不被重建（§4-2）` 实测 **FAIL**：`标签按钮被整页重建（焦点与 :hover 会丢失）`；修复后 **PASS**：`标签栏/工具按钮/焦点/选中项均保留`。另一条 `行情刷新后数据区仍然更新（§4-2）` 全程通过（12.34 → 56.78），用来防止"靠少渲染把数据冻住"。冒烟 20 → **23 项全通过**；`npm run verify`（292 测试）与 `smoke:news`/`smoke:profile` 通过（`smoke:data` 仍为上游不可达） |
 
 **关于第 60 条的额外发现**：这意味着原报告把症状（旧预览残留）当成了问题，真正的问题是"草稿依赖区只在整页重渲染时更新"。修复后顺带消除了一个用户可见的死路：粘贴 JSON 后不必再靠"动别的字段"来逼出一次重渲染。
 
@@ -160,8 +161,7 @@
 
 **尚未处理**（按报告路线图，需要更大改动或人工验证）：
 
-- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分三步已完成（1398 → 979 行），§4-6 已修（#59），§4-8 里配置导入面板的"UI 说谎"已修（#60），§4-7 的共享格式化层已完成两批（#46/#57），§4-10 已建调色板护栏与首层 token（#61），§4-4 的 IPC 边界校验已做（#62）。**仍是代码工作、尚未做的只剩一块**：
-  - **§4-2（高）主悬浮窗每次刷新全量重建 DOM**：`renderer.ts` 的 `render()` 每次快照推送都重建整个部件（前台约 3 秒一次、上千节点），后果与刚修完的 §4-6 同类（焦点、文本选区、IME 组合、`<details>` 展开态、标签溢出 `<select>` 的展开状态全被打断）。修复方向：header/footer/标签栏只渲染一次，仅重建 `.page-body` 并用 `pageKey` 守卫。**验证手段已就绪**：`smoke:electron` 可以在隐藏窗口里推两次快照并断言焦点/展开态是否存活（与 §4-6 同一套做法；`renderer.ts` 已有 `emptySnapshot` 可作为合法快照的骨架）。
+- **Phase E**：`settingsRenderer.ts` 拆分三步已完成（1398 → 979 行），§4-6 已修（#59），§4-8 里配置导入面板的"UI 说谎"已修（#60），§4-7 的共享格式化层已完成两批（#46/#57），§4-10 已建调色板护栏与首层 token（#61），§4-4 的 IPC 边界校验已做（#62），**§4-2 主悬浮窗整页重建已修（#63）**。§4 里**代码工作已全部完成**，剩下的都是需要产品/设计确认的显示口径（见下）。
 - **Phase F（GUI 相关，最后）**：§7-1 Electron 已升到 **44.4.5**（Chromium 152 / Node 24.21），并新增 `npm run smoke:electron`（隐藏窗口跑 **20 项**运行时 API + 交互检查，本次全通过，见 §0.1 #58/#59/#60）。**仍需人工在实机过一遍**：透明度/圆角观感、托盘菜单交互、老板键跨应用隐藏/呼出、点击穿透手感、通知投递，以及 `npm run package:win` 的 Electron 44 打包与安装。
 - **需要产品/设计确认后才能继续的 4 项**（都会改变用户看到的颜色或文字，因此没有静默改）：
   1. **涨跌语义色统一**（§4-10）：`styles.css` 用 `#ff6b6b`/`#4ecdc4`、`quick.css` 用 `#ad3b38`/`#287a52`、Excel 用 `#107c41`；另外 `data-theme="stealth"` 只作用于悬浮窗（`quickRenderer` 从不设置 `dataset.theme`）。
@@ -352,12 +352,14 @@
 - 后果：持仓/自选/新闻列表**仍每约 3 秒跳回顶部**（`refreshPolicy.ts:10 FOREGROUND_QUOTE_INTERVAL_MS = 3_000`），而那段代码提供了虚假的安全感。上一轮审计将其记为"已修复"，属误判。
 - 修复（一行级）：把滚动目标改为 `.scroll-list`。
 
-### 4-2 【高·已核实】主悬浮窗每次刷新全量重建 DOM
+### 4-2 【高·已核实】主悬浮窗每次刷新全量重建 DOM —— 已修复（见 §0.1 #63）
 
 - `renderer.ts:221` 重建整个部件，频率为每次快照推送。`main.ts:861-866` 虽有"指纹相同且 15 秒内"去重（控制方已核实），但实盘价格每 tick 都变 → 实际每 3 秒（前台）/ 5 秒重建一次，每次约上千节点。
 - 后果：焦点丢失、文本选区销毁、IME 组合中断、`<details>` 展开态丢失、CSS 过渡重启；典型现象是 `renderer.ts:290-293` 的标签溢出 `<select>` 下拉打开时被重建，用户切换被打断。
 - **不是**监听器泄漏：事件采用委托注册，全文件仅 3 处 `addEventListener`（`:952/:1023/:1039`），模块初始化时注册一次 → 重建不累积监听器。这点实现正确。
 - 修复：header/footer/标签栏只渲染一次，仅重建 `.page-body` 并用 `pageKey` 守卫跳过无变化的重建。
+  - **进度（已修复，见 §0.1 #63）**：新增 `ensureShell(tab)` —— 外壳（标题栏 / 标签栏 `<nav>` / 页脚）只在**首次**或页面类型变化（`widget page-*` 类）时创建，其余推送复用同一批节点；每次推送只做三件事：① 标题变化才写 `h1.textContent`；② 点击穿透按钮的 `class`/`aria-pressed`/`title` 变化才改；③ 标签栏按**结构签名**（可见标签 id+标题+当前标签）判断是否重建，签名不变时连溢出 `<select>` 的节点身份、选中项与展开状态都保留；数据区（`.page-content` 与 `.page-body`）每次推送照旧重建成新内容——**不能用"少渲染"换"数据不刷新"**，冒烟里专门有一条守着这点。
+  - 与报告中"仅重建 `.page-body` 并用 `pageKey` 守卫"的差别：页面数据每 3 秒就变（价格/新闻），用 `pageKey` 整体跳过重建会让行情停更；因此改成"外壳只建一次 + 数据区每次重建"，既能保住焦点/下拉/`:hover`，又不牺牲刷新。真正的逐行 diff 需要按行 key 的定点更新（与 §4-3 的 Excel 单元格差异表同一类做法），收益递减，未做。
 
 ### 4-3 【高·已核实】README 的表格工作台声明被证伪
 

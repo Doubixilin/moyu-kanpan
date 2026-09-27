@@ -526,6 +526,154 @@ async function main() {
       return "预览已清空 + 确认导入禁用 + 光标保持";
     });
 
+    // —— §4-2：主悬浮窗每次快照推送都整页重建 DOM ——
+    const { emptyMarketOverview } = await import(
+      pathToFileURL(path.join(root, "dist-electron", "src", "domain", "market.js")).href
+    );
+    const { emptyRiskSnapshot } = await import(
+      pathToFileURL(path.join(root, "dist-electron", "src", "domain", "risk.js")).href
+    );
+    // 主窗口用一份独立的设置：多加 4 个可见页，逼出标签栏的溢出 <select>
+    const mainSettings = structuredClone(smokeSettings);
+    for (let index = 0; index < 4; index += 1) {
+      mainSettings.tabs.push({
+        id: "smoke-tab-" + index,
+        type: "watchlist",
+        title: "冒烟页" + index,
+        builtIn: false,
+        visible: true,
+        order: 100 + index,
+        securityCodes: [],
+        maxItems: 8,
+        newsMode: "watchlist_related"
+      });
+    }
+    mainSettings.navigation = {
+      ...mainSettings.navigation,
+      defaultTabId: "watchlist",
+      lastActiveTabId: "watchlist",
+      rememberLastTab: true
+    };
+    const now = new Date().toISOString();
+    const feedStatus = () => ({
+      lastSuccessAt: now,
+      dataUpdatedAt: now,
+      lastChangedAt: now,
+      stale: false,
+      stalled: false,
+      source: "eastmoney",
+      coverage: 1,
+      degraded: false,
+      conflictCount: 0,
+      retainedCount: 0,
+      missingCount: 0,
+      alertSafe: true,
+      providerHealth: [],
+      marketState: "trading"
+    });
+    const makeSnapshot = (price) => ({
+      quotes: [
+        {
+          code: "600519",
+          name: "贵州茅台",
+          market: "SH",
+          price,
+          change: 0.12,
+          changePercent: 1.23,
+          open: price,
+          previousClose: price - 0.12,
+          high: price,
+          low: price,
+          volume: 1200,
+          amount: 148000,
+          source: "eastmoney",
+          updatedAt: now,
+          quality: { state: "fresh", receivedAt: now, reasons: [] }
+        }
+      ],
+      news: [],
+      market: emptyMarketOverview(),
+      risk: emptyRiskSnapshot(),
+      ai: {
+        enabled: false,
+        configured: false,
+        secureStorageAvailable: false,
+        credentialSource: "none",
+        state: "unconfigured",
+        provider: "deepseek",
+        model: "smoke",
+        lastTestedAt: null,
+        lastSuccessAt: null,
+        message: "冒烟"
+      },
+      errors: [],
+      updatedAt: now,
+      settings: mainSettings,
+      feeds: { quotes: feedStatus(), news: feedStatus() },
+      ui: { clickThrough: false }
+    });
+
+    await window.loadFile(path.join(root, "dist", "index.html"));
+    window.webContents.send("snapshot:update", makeSnapshot(12.34));
+    await delay(250);
+    const mainReady = await evaluate(`
+      (() => {
+        const select = document.querySelector('select[data-action="tab-overflow"]');
+        const tab = document.querySelector('.tabs button[data-action="tab"]');
+        const body = document.querySelector('.page-body');
+        if (!select || !tab || !body) {
+          return { missing: { select: !select, tab: !tab, body: !body } };
+        }
+        // 记住节点身份，后面第二次推送后比对
+        window.__mainProbe = { select, tab, ctButton: document.querySelector('button[data-action="click-through"]') };
+        select.focus();
+        select.selectedIndex = 1;
+        return {
+          focused: document.activeElement === select,
+          priceText: body.textContent.includes('12.34')
+        };
+      })()
+    `);
+    check("悬浮窗首屏：标签溢出 select 可用且能获得焦点（§4-2 前置）", () => {
+      if (mainReady.missing) throw new Error("缺少元素：" + JSON.stringify(mainReady.missing));
+      if (!mainReady.focused) throw new Error("溢出 select 无法获得焦点");
+      if (!mainReady.priceText) throw new Error("列表里没有渲染出报价");
+      return "select 已聚焦 + 报价已渲染";
+    });
+
+    // 第二次推送：模拟行情刷新（价格变了）
+    window.webContents.send("snapshot:update", makeSnapshot(56.78));
+    await delay(250);
+    const afterPush = await evaluate(`
+      (() => {
+        const probe = window.__mainProbe;
+        const body = document.querySelector('.page-body');
+        return {
+          sameSelect: document.contains(probe.select),
+          sameTab: document.contains(probe.tab),
+          sameClickThroughButton: probe.ctButton ? document.contains(probe.ctButton) : false,
+          focused: document.activeElement === probe.select,
+          selectedIndex: probe.select.selectedIndex,
+          priceUpdated: body.textContent.includes('56.78'),
+          stalePrice: body.textContent.includes('12.34')
+        };
+      })()
+    `);
+    check("行情刷新后标签栏/工具按钮节点不被重建（§4-2）", () => {
+      if (!afterPush.sameTab) throw new Error("标签按钮被整页重建（焦点与 :hover 会丢失）");
+      if (!afterPush.sameSelect)
+        throw new Error("溢出 select 被重建（下拉展开时用户切换会被打断）");
+      if (!afterPush.sameClickThroughButton) throw new Error("工具按钮被重建");
+      if (!afterPush.focused) throw new Error("焦点丢失");
+      if (afterPush.selectedIndex !== 1) throw new Error("select 选中项被重置");
+      return "标签栏/工具按钮/焦点/选中项均保留";
+    });
+    check("行情刷新后数据区仍然更新（§4-2）", () => {
+      if (!afterPush.priceUpdated) throw new Error("价格没有更新——修 DOM 重建不能以冻结数据为代价");
+      if (afterPush.stalePrice) throw new Error("旧价格仍在页面上");
+      return "价格已从 12.34 更新为 56.78";
+    });
+
     // 其余 4 个渲染器都是模块顶层同步写首屏标记，因此"根节点有子元素"就等价于
     // "脚本在 Chromium 152 下真的执行了"（模块加载失败/CSP 拦截都会留空）。
     for (const page of [
