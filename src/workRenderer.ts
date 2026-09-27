@@ -1,4 +1,5 @@
 import type { PublicSnapshot, PublicTrend } from "./presentation/publicSnapshot.js";
+import { normalizePublicSnapshot, normalizePublicTrend } from "./presentation/publicSnapshot.js";
 import {
   changeDirection,
   escapeHtml,
@@ -205,11 +206,20 @@ async function initialize(): Promise<void> {
     const response = await fetch("/api/public-snapshot", { cache: "no-store" });
     if (!response.ok) throw new Error("snapshot");
     sessionReady = true;
-    applySnapshot((await response.json()) as PublicSnapshot);
+    // 边界校验一次：载荷形状不对就报"数据格式"而不是掉进 catch 的"访问已失效"（§4-4）。
+    const snapshot = normalizePublicSnapshot(await response.json());
+    if (!snapshot) throw new Error("snapshot-shape");
+    applySnapshot(snapshot);
     connectEvents();
     await reportVisibility();
-  } catch {
-    setConnection("error", "访问已失效", "请从应用托盘重新打开");
+  } catch (error) {
+    // 数据格式问题与"会话失效"是两回事：此前一律报"访问已失效，请从托盘重新打开"，
+    // 把载荷形状问题说成了权限问题，用户怎么重开都没用（审计报告 §4-4）。
+    if (error instanceof Error && error.message.endsWith("-shape")) {
+      setConnection("error", "数据格式不符", "本地服务返回的载荷无法解析，请重启应用");
+    } else {
+      setConnection("error", "访问已失效", "请从应用托盘重新打开");
+    }
   }
 }
 
@@ -221,7 +231,8 @@ function connectEvents(): void {
     const payload = (event as MessageEvent<unknown>).data;
     if (typeof payload !== "string") return;
     try {
-      applySnapshot(JSON.parse(payload) as PublicSnapshot);
+      const next = normalizePublicSnapshot(JSON.parse(payload));
+      if (next) applySnapshot(next);
     } catch {
       /* keep cache */
     }
@@ -328,7 +339,8 @@ async function loadTrend(code: string, expand: boolean): Promise<void> {
       cache: "no-store"
     });
     if (!response.ok) throw new Error("trend");
-    const trend = (await response.json()) as PublicTrend;
+    const trend = normalizePublicTrend(await response.json());
+    if (!trend) throw new Error("trend-shape");
     trends.set(code, trend);
     if (latest) renderProjectTable(latest);
     if ((expand || selectedTrendCode === code) && selectedTrendCode === code)
@@ -517,7 +529,7 @@ function saveContent(): void {
 }
 function loadSnapshotCache(): PublicSnapshot | null {
   try {
-    return JSON.parse(localStorage.getItem(cacheKey) ?? "null") as PublicSnapshot | null;
+    return normalizePublicSnapshot(JSON.parse(localStorage.getItem(cacheKey) ?? "null"));
   } catch {
     return null;
   }

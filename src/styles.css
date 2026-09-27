@@ -316,6 +316,19 @@ h1 {
   font-weight: 700;
 }
 
+/* preload 桥接缺失时的可见错误态：透明窗口上的纯文本几乎读不出来（§4-4）。
+   颜色复用 alert-banner 的既有取值，避免再往调色板里加新色。 */
+.bridge-error {
+  margin: 10px;
+  padding: 8px 10px;
+  border-left: 2px solid #ffd166;
+  border-radius: 6px;
+  color: rgb(237 242 244 / 0.72);
+  background: rgb(255 209 102 / 0.08);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .alert-banner strong,
 .alert-banner em {
   overflow: hidden;

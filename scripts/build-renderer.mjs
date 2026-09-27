@@ -24,9 +24,11 @@ await compileTypeScript("src/settings/controllers/profile.ts", "settings/control
 await compileTypeScript("src/presentation/excelWorkbook.ts", "presentation/excelWorkbook.js");
 await compileTypeScript("src/presentation/excelCustomSheet.ts", "presentation/excelCustomSheet.js");
 await compileTypeScript("src/presentation/excelTrend.ts", "presentation/excelTrend.js");
+await compileTypeScript("src/presentation/publicSnapshot.ts", "presentation/publicSnapshot.js");
 await compileTypeScript("src/shortcut.ts", "shortcut.js");
 await compileTypeScript("src/domain/news.ts", "domain/news.js");
 await compileTypeScript("src/domain/errors.ts", "domain/errors.js");
+await compileTypeScript("src/domain/appSnapshotShape.ts", "domain/appSnapshotShape.js");
 await compileTypeScript("src/domain/decision.ts", "domain/decision.js");
 await copyFile(path.join(root, "src/styles.css"), path.join(assets, "main.css"));
 await copyFile(path.join(root, "src/settings.css"), path.join(assets, "settings.css"));

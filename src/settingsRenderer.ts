@@ -1009,24 +1009,32 @@ function clearMessage(): void {
 }
 
 render();
-void Promise.all([
-  window.floatingStock?.getSettings(),
-  window.floatingStock?.getAiStatus(),
-  window.floatingStock?.hasProfileBackup()
-])
-  .then(([nextSettings, nextAiStatus, nextHasBackup]) => {
-    if (nextSettings) settings = nextSettings;
-    if (nextAiStatus) ai.status = nextAiStatus;
-    profile.hasBackup = nextHasBackup === true;
+if (!window.floatingStock) {
+  // 桥接缺失时此前所有 `?.` 都会静默跳过 → 页面永远停在"正在读取设置…"（审计报告 §4-4）。
+  showMessage(
+    "无法连接到应用主进程：请重启摸鱼看盘；若仍然如此，请从托盘退出后重新打开。",
+    "error"
+  );
+} else {
+  void Promise.all([
+    window.floatingStock.getSettings(),
+    window.floatingStock.getAiStatus(),
+    window.floatingStock.hasProfileBackup()
+  ])
+    .then(([nextSettings, nextAiStatus, nextHasBackup]) => {
+      if (nextSettings) settings = nextSettings;
+      if (nextAiStatus) ai.status = nextAiStatus;
+      profile.hasBackup = nextHasBackup === true;
+      render();
+    })
+    .catch((error) => showMessage(error instanceof Error ? error.message : String(error), "error"));
+  window.floatingStock.onSettings((value) => {
+    if (settingsDirty) return;
+    settings = value;
     render();
-  })
-  .catch((error) => showMessage(error instanceof Error ? error.message : String(error), "error"));
-window.floatingStock?.onSettings((value) => {
-  if (settingsDirty) return;
-  settings = value;
-  render();
-});
-window.floatingStock?.onAiStatus((value) => {
-  ai.status = value;
-  render();
-});
+  });
+  window.floatingStock.onAiStatus((value) => {
+    ai.status = value;
+    render();
+  });
+}

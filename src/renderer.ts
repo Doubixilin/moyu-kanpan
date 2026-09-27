@@ -20,6 +20,7 @@ import {
   formatFixedOrDash,
   formatSignedPercent
 } from "./presentation/format.js";
+import { describeAppSnapshotProblem } from "./domain/appSnapshotShape.js";
 
 const defaultSettings: UserSettings = {
   schemaVersion: 8,
@@ -249,6 +250,8 @@ let marketDetailRequestId = 0;
 let marketDetailRefreshTimer: number | null = null;
 let lastRenderedPageKey = "";
 let copyFeedbackTimer: number | null = null;
+/** 边界自检发现的第一处形状问题（§4-4）：非空时在部件顶部显示，避免状态栏"说谎"。 */
+let shapeProblem: string | null = null;
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root");
@@ -289,6 +292,7 @@ function render(next: AppSnapshot): void {
       </header>
       ${renderTabBar(next.settings, tab.id)}
       <section class="page-content">
+        ${renderShapeProblem()}
         ${renderRecentAlert(snapshot)}
         ${renderErrors(snapshot.errors)}
         <div class="page-body">
@@ -1163,12 +1167,46 @@ async function activateTab(tabId: string): Promise<void> {
   await window.floatingStock?.setActiveTab(tabId);
 }
 
-void window.floatingStock?.getSnapshot().then(render);
-window.floatingStock?.onSnapshot(render);
+if (!window.floatingStock) {
+  // preload 桥接没装好时，此前所有 `?.` 都会静默跳过 → 部件永远停在 emptySnapshot，
+  // 既不报错也不重试（审计报告 §4-4）。这里至少让用户看到"为什么是空的"。
+  rootElement.innerHTML =
+    '<main class="window-shell"><p class="bridge-error">无法连接到应用主进程：请重启摸鱼看盘；若仍然如此，请从托盘退出后重新打开。</p></main>';
+} else {
+  // 边界自检：主进程改字段名时，渲染层读到的会是 undefined（状态栏反而显示"正常"），
+  // 类型系统在 `ipcRenderer.invoke` 这条 any 通道上不会报错，所以这里显式查一次（§4-4）。
+  let reportedShapeProblem: string | null = null;
+  const acceptSnapshot = (value: unknown): void => {
+    const problem = describeAppSnapshotProblem(value);
+    if (problem) {
+      if (problem !== reportedShapeProblem) {
+        reportedShapeProblem = problem;
+        shapeProblem = problem;
+        render(value as AppSnapshot);
+      }
+      return;
+    }
+    shapeProblem = null;
+    render(value as AppSnapshot);
+  };
+  void window.floatingStock.getSnapshot().then(acceptSnapshot);
+  window.floatingStock.onSnapshot(acceptSnapshot);
+  render(emptySnapshot);
+}
 window.addEventListener("online", () => {
   void window.floatingStock?.notifyOnline();
 });
-render(emptySnapshot);
+
+/**
+ * IPC 载荷形状不对时的可见提示（§4-4）。
+ *
+ * 以前字段改名会让状态栏读到一堆 `undefined` 并显示"一切正常"；这里把第一处问题
+ * 直接写出来，用户和开发者都能立刻看到是哪条通道坏了。
+ */
+function renderShapeProblem(): string {
+  if (!shapeProblem) return "";
+  return `<section class="alert-banner active" role="alert"><span>!</span><strong>数据格式异常</strong><em>${escapeHtml(shapeProblem)}</em></section>`;
+}
 
 function renderRecentAlert(next: AppSnapshot): string {
   const event = next.risk.recentEvents[0];

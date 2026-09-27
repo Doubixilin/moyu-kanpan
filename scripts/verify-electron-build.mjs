@@ -20,9 +20,15 @@ if (!main.includes('"preload.cjs"')) {
   throw new Error("Electron main process does not reference preload.cjs");
 }
 
+// 5 个渲染器入口都要走一遍 import 闭包：此前只查 main.js/settings.js，
+// 漏掉的模块（例如 work 页新引入的 publicSnapshot）要到运行时才 404。
+// 这正是 smoke:electron 先发现"项目工作网页首屏为空"的原因。
 await verifyRendererImports([
   path.join(rendererAssets, "main.js"),
-  path.join(rendererAssets, "settings.js")
+  path.join(rendererAssets, "settings.js"),
+  path.join(rendererAssets, "quick.js"),
+  path.join(rendererAssets, "excel.js"),
+  path.join(rendererAssets, "workweb.js")
 ]);
 
 async function verifyRendererImports(entries) {
