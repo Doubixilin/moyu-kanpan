@@ -3,7 +3,8 @@ import type {
   LiveQuoteSource,
   ProviderHealth,
   Quote,
-  QuoteQualityState
+  QuoteQualityState,
+  QuoteRequest
 } from "../domain/types.js";
 import { fetchEastmoneyQuotes } from "../providers/eastmoney.js";
 import { fetchTencentQuotes } from "../providers/tencent.js";
@@ -15,7 +16,8 @@ import {
 } from "./quoteQuality.js";
 
 export type QuoteProviderName = LiveQuoteSource;
-export type QuoteProvider = (codes: string[]) => Promise<Quote[]>;
+/** provider 接收"代码 + 显式市场"的请求列表（见 `QuoteRequest` 的说明）。 */
+export type QuoteProvider = (requests: QuoteRequest[]) => Promise<Quote[]>;
 
 export interface QuoteProviderSet {
   eastmoney: QuoteProvider;
@@ -120,14 +122,16 @@ export class QuoteCoordinator {
   ) {}
 
   async fetch(
-    codes: string[],
+    requests: QuoteRequest[],
     preferred: QuoteProviderName,
     context: QuoteValidationContext = { marketOpen: false }
   ): Promise<QuoteFetchResult> {
     this.cycle += 1;
     const nowMs = context.nowMs ?? Date.now();
     this.currentNowMs = nowMs;
-    const requestedCodes = [...new Set(codes.map((code) => code.trim()).filter(Boolean))];
+    // 行情校验与冲突判定都以"代码"为键；显式 market 只用于拼上游请求。
+    const requested = dedupeRequests(requests);
+    const requestedCodes = requested.map((request) => request.code);
     if (this.lastPreferred !== preferred) {
       this.lastPreferred = preferred;
       this.activeSource = preferred;
@@ -141,17 +145,20 @@ export class QuoteCoordinator {
     let primarySource = this.activeSource ?? preferred;
     if (this.isCircuitOpen(primarySource, nowMs)) primarySource = otherSource(primarySource);
     const secondarySource = otherSource(primarySource);
-    const primary = await this.attempt(primarySource, requestedCodes, context);
+    const primary = await this.attempt(primarySource, requested, context);
 
     const unresolved = requestedCodes.filter((code) => !primary.validations.get(code)?.trusted);
     const crossCheck = this.shouldCrossCheck(nowMs);
     const recoveryProbe = primarySource !== preferred && this.shouldProbeRecovery(nowMs);
     if (crossCheck) this.lastCrossCheckAt = nowMs;
     if (recoveryProbe) this.lastRecoveryProbeAt = nowMs;
-    const secondaryCodes = crossCheck || recoveryProbe ? requestedCodes : unresolved;
+    const secondaryRequests =
+      crossCheck || recoveryProbe
+        ? requested
+        : requested.filter((request) => unresolved.includes(request.code));
     const secondary =
-      secondaryCodes.length > 0
-        ? await this.attempt(secondarySource, secondaryCodes, context)
+      secondaryRequests.length > 0
+        ? await this.attempt(secondarySource, secondaryRequests, context)
         : emptyAttempt(secondarySource);
 
     const receivedAt = new Date(context.nowMs ?? Date.now()).toISOString();
@@ -278,9 +285,10 @@ export class QuoteCoordinator {
 
   private async attempt(
     source: QuoteProviderName,
-    requestedCodes: string[],
+    requested: QuoteRequest[],
     context: QuoteValidationContext
   ): Promise<ProviderAttempt> {
+    const requestedCodes = requested.map((request) => request.code);
     if (requestedCodes.length === 0) return emptyAttempt(source);
     const nowMs = context.nowMs ?? Date.now();
     if (this.isCircuitOpen(source, nowMs)) {
@@ -296,7 +304,7 @@ export class QuoteCoordinator {
     let rawQuotes: Quote[] = [];
     let failure: string | null = null;
     try {
-      rawQuotes = await this.providers[source](requestedCodes);
+      rawQuotes = await this.providers[source](requested);
       if (rawQuotes.length === 0) failure = "empty response";
     } catch (error) {
       failure = errorMessage(error);
@@ -480,13 +488,24 @@ export class QuoteCoordinator {
  * 这适合 smoke 脚本与单元测试这类一次性探测；应用内请复用长期存活的 `QuoteCoordinator`。
  */
 export async function fetchQuotesWithFallback(
-  codes: string[],
+  requests: QuoteRequest[],
   preferred: QuoteProviderName,
   providers: QuoteProviderSet = defaultProviders
 ): Promise<QuoteFetchResult> {
-  return new QuoteCoordinator(providers, { crossCheckEvery: 0 }).fetch(codes, preferred, {
+  return new QuoteCoordinator(providers, { crossCheckEvery: 0 }).fetch(requests, preferred, {
     marketOpen: false
   });
+}
+
+/** 去空白、去重（同一代码只保留第一次出现的市场）。 */
+function dedupeRequests(requests: QuoteRequest[]): QuoteRequest[] {
+  const seen = new Map<string, QuoteRequest>();
+  for (const request of requests) {
+    const code = request.code.trim();
+    if (!code || seen.has(code)) continue;
+    seen.set(code, { code, market: request.market });
+  }
+  return [...seen.values()];
 }
 
 function firstUsable(

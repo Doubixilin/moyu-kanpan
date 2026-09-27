@@ -16,6 +16,15 @@ describe("tencent provider", () => {
     // 900xxx 是沪市 B 股，不能被 "9 开头" 规则误判为北交所。
     assert.equal(marketPrefixForCode("900001"), "sh");
   });
+  it("prefers the explicit market over prefix inference", () => {
+    // §3-2：显式市场优先；UNKNOWN 视为"没说"，回到前缀推断。
+    assert.equal(marketPrefixForCode("600519", "SH"), "sh");
+    assert.equal(marketPrefixForCode("000001", "SZ"), "sz");
+    assert.equal(marketPrefixForCode("920099", "BJ"), "bj");
+    assert.equal(marketPrefixForCode("600519", "BJ"), "bj");
+    assert.equal(marketPrefixForCode("920099", "SH"), "sh");
+    assert.equal(marketPrefixForCode("920099", "UNKNOWN"), "bj");
+  });
   it("parses Tencent tilde-delimited quote text", () => {
     // 字段布局按真实响应构造：成交额在 [37]（万元），总市值在 [45]（亿元）。
     const text =

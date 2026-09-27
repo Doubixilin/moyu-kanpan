@@ -6,6 +6,19 @@ export type LiveQuoteSource = "eastmoney" | "tencent";
 export type QuoteQualityState = "fresh" | "fallback" | "stale" | "retained" | "conflict";
 export type MarketSessionState = "trading" | "preopen" | "lunch" | "closed" | "holiday" | "weekend";
 
+/**
+ * 一次批量行情请求里的单个标的：**显式带上市场**。
+ *
+ * 审计报告 §3-2：provider 此前只拿到代码、再按前缀自己猜市场，于是"配置里的 market"
+ * 与"实际路由用的 market"是两份可能不一致的事实（`920xxx` 曾被当成深市）。
+ * 现在把市场作为请求的一部分传下去，provider 只在**没有**market 时才回退到前缀推断
+ * （回退保留给测试与直接调用方）。
+ */
+export interface QuoteRequest {
+  code: string;
+  market: MarketCode;
+}
+
 export interface QuoteQuality {
   state: QuoteQualityState;
   receivedAt: string;

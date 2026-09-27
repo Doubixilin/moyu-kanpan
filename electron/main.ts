@@ -27,6 +27,7 @@ import {
   testAiConnection as testAiProviderConnection
 } from "../src/ai/openaiCompatible.js";
 import {
+  activeQuoteRequests,
   activeSecurityCodes,
   preserveRuntimeSecrets,
   toUserSettings,
@@ -840,7 +841,8 @@ function refreshAfterConnectivityChange(): void {
 async function refreshQuotes(): Promise<void> {
   const evaluationTime = new Date();
   try {
-    const codes = activeSecurityCodes(config);
+    const requests = activeQuoteRequests(config);
+    const codes = requests.map((request) => request.code);
     if (codes.length === 0) {
       latestQuotes = [];
       latestQuoteFingerprint = null;
@@ -866,7 +868,7 @@ async function refreshQuotes(): Promise<void> {
             latestErrors,
             "calendar:交易日历未收录当前年份，休市日将按交易日处理，请更新到新版本"
           );
-      const result = await quoteCoordinator.fetch(codes, config.providers.quote, {
+      const result = await quoteCoordinator.fetch(requests, config.providers.quote, {
         marketOpen: isAShareTradingSession(now),
         nowMs: now.getTime(),
         maxSourceAgeMs: Math.max(config.pollIntervals.quotesMs * 6, 60_000)

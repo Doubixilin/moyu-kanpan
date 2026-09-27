@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Quote } from "../../domain/types";
+import type { Quote, QuoteRequest } from "../../domain/types";
 import { QuoteCoordinator, fetchQuotesWithFallback, type QuoteProviderSet } from "../quotes";
+
+/** 测试用的行情请求：显式市场按代码前缀给一个合理值。 */
+function reqs(...codes: string[]): QuoteRequest[] {
+  return codes.map((code) => ({
+    code,
+    market:
+      code.startsWith("6") || code.startsWith("5")
+        ? "SH"
+        : code.startsWith("4") || code.startsWith("8") || code.startsWith("920")
+          ? "BJ"
+          : "SZ"
+  }));
+}
 
 function quote(code: string, source: "eastmoney" | "tencent", patch: Partial<Quote> = {}): Quote {
   return {
@@ -24,7 +37,7 @@ function quote(code: string, source: "eastmoney" | "tencent", patch: Partial<Quo
 
 describe("quote provider fallback", () => {
   it("uses Tencent when Eastmoney fails", async () => {
-    const result = await fetchQuotesWithFallback(["600519"], "eastmoney", {
+    const result = await fetchQuotesWithFallback(reqs("600519"), "eastmoney", {
       eastmoney: async () => {
         throw new Error("unavailable");
       },
@@ -39,10 +52,10 @@ describe("quote provider fallback", () => {
 
   it("only asks the fallback provider for missing securities", async () => {
     let tencentRequest: string[] = [];
-    const result = await fetchQuotesWithFallback(["600519", "000001"], "eastmoney", {
+    const result = await fetchQuotesWithFallback(reqs("600519", "000001"), "eastmoney", {
       eastmoney: async () => [quote("600519", "eastmoney")],
-      tencent: async (codes) => {
-        tencentRequest = codes;
+      tencent: async (requests) => {
+        tencentRequest = requests.map((request) => request.code);
         return [quote("000001", "tencent")];
       }
     });
@@ -56,6 +69,25 @@ describe("quote provider fallback", () => {
     assert.equal(result.fallbackCount, 1);
     assert.equal(result.coverage, 1);
     assert.equal(result.alertSafe, true);
+  });
+
+  it("passes the explicit market through to the provider", async () => {
+    // §3-2 的核心：provider 不能自己按代码前缀猜市场，必须拿到调用方给的那一份。
+    let seen: QuoteRequest[] = [];
+    const coordinator = new QuoteCoordinator({
+      eastmoney: async (requests) => {
+        seen = requests;
+        return [quote("920099", "eastmoney", { market: "BJ" })];
+      },
+      tencent: async () => []
+    });
+
+    await coordinator.fetch([{ code: "920099", market: "BJ" }], "eastmoney", { marketOpen: false });
+    assert.deepEqual(seen, [{ code: "920099", market: "BJ" }]);
+
+    // 同一代码配不同市场时，provider 收到的是调用方给的市场，而不是前缀推断的结果
+    await coordinator.fetch([{ code: "600519", market: "BJ" }], "eastmoney", { marketOpen: false });
+    assert.deepEqual(seen, [{ code: "600519", market: "BJ" }]);
   });
 
   it("falls back when the primary returns HTTP-success but stale source data", async () => {
@@ -76,7 +108,7 @@ describe("quote provider fallback", () => {
       { crossCheckEvery: 0 }
     );
 
-    const result = await coordinator.fetch(["600519"], "eastmoney", {
+    const result = await coordinator.fetch(reqs("600519"), "eastmoney", {
       marketOpen: true,
       nowMs,
       maxSourceAgeMs: 60_000
@@ -99,10 +131,10 @@ describe("quote provider fallback", () => {
       }
     };
     const coordinator = new QuoteCoordinator(providers, { crossCheckEvery: 1 });
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
     fail = true;
 
-    const result = await coordinator.fetch(["600519"], "eastmoney", {
+    const result = await coordinator.fetch(reqs("600519"), "eastmoney", {
       marketOpen: false
     });
     assert.equal(result.quotes[0]?.price, 100);
@@ -137,10 +169,10 @@ describe("quote provider fallback", () => {
       { crossCheckEvery: 1 }
     );
 
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
     eastPrice = 102;
     tencentPrice = 104;
-    const result = await coordinator.fetch(["600519"], "eastmoney", {
+    const result = await coordinator.fetch(reqs("600519"), "eastmoney", {
       marketOpen: false
     });
 
@@ -170,9 +202,9 @@ describe("quote provider fallback", () => {
       }
     );
 
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
-    const result = await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
+    const result = await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
 
     assert.equal(eastmoneyCalls, 2);
     assert.equal(
@@ -206,12 +238,12 @@ describe("quote provider fallback", () => {
       }
     );
 
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
     eastmoneyFails = false;
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
     calls.length = 0;
-    const recovered = await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
+    const recovered = await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
 
     assert.equal(calls[0], "eastmoney");
     assert.equal(recovered.quotes[0]?.source, "eastmoney");
@@ -238,10 +270,10 @@ describe("quote provider fallback", () => {
       }
     );
 
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
     calls.length = 0;
     eastFails = false;
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false });
     assert.equal(calls[0], "tencent");
   });
 
@@ -256,10 +288,16 @@ describe("quote provider fallback", () => {
     });
     const start = Date.parse("2026-07-10T02:00:00.000Z");
 
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start });
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start + 44_000 });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false, nowMs: start });
+    await coordinator.fetch(reqs("600519"), "eastmoney", {
+      marketOpen: false,
+      nowMs: start + 44_000
+    });
     assert.equal(tencentCalls, 0);
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start + 45_000 });
+    await coordinator.fetch(reqs("600519"), "eastmoney", {
+      marketOpen: false,
+      nowMs: start + 45_000
+    });
     assert.equal(tencentCalls, 1);
   });
 
@@ -283,10 +321,16 @@ describe("quote provider fallback", () => {
     );
     const start = Date.parse("2026-07-10T02:00:00.000Z");
 
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start });
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start + 5_000 });
+    await coordinator.fetch(reqs("600519"), "eastmoney", { marketOpen: false, nowMs: start });
+    await coordinator.fetch(reqs("600519"), "eastmoney", {
+      marketOpen: false,
+      nowMs: start + 5_000
+    });
     assert.equal(eastmoneyCalls, 1);
-    await coordinator.fetch(["600519"], "eastmoney", { marketOpen: false, nowMs: start + 16_000 });
+    await coordinator.fetch(reqs("600519"), "eastmoney", {
+      marketOpen: false,
+      nowMs: start + 16_000
+    });
     assert.equal(eastmoneyCalls, 2);
   });
 });

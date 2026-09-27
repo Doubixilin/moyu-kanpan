@@ -1,4 +1,4 @@
-import type { MarketCode, Quote } from "../domain/types.js";
+import type { MarketCode, Quote, QuoteRequest } from "../domain/types.js";
 import { decode } from "iconv-lite";
 import { fetchWithTimeout } from "./fetch.js";
 import { asNumber } from "./parseUtils.js";
@@ -30,11 +30,13 @@ export function parseTencentQuoteText(text: string): Quote[] {
 }
 
 export async function fetchTencentQuotes(
-  codes: string[],
+  requests: QuoteRequest[],
   fetcher = fetch,
   timeoutMs = 2_500
 ): Promise<Quote[]> {
-  const symbols = codes.map((code) => `${marketPrefixForCode(code)}${code}`).join(",");
+  const symbols = requests
+    .map((request) => `${marketPrefixForCode(request.code, request.market)}${request.code}`)
+    .join(",");
   const response = await fetchWithTimeout(
     fetcher,
     `https://qt.gtimg.cn/q=${symbols}`,
@@ -48,7 +50,15 @@ export async function fetchTencentQuotes(
   return parseTencentQuoteText(decode(buffer, "gbk"));
 }
 
-export function marketPrefixForCode(code: string): "sh" | "sz" | "bj" {
+/**
+ * 腾讯行情前缀：`sh` / `sz` / `bj`。
+ *
+ * 传了 `market` 就以它为准（审计报告 §3-2），没传才按代码前缀推断。
+ */
+export function marketPrefixForCode(code: string, market?: MarketCode): "sh" | "sz" | "bj" {
+  if (market === "SH") return "sh";
+  if (market === "SZ") return "sz";
+  if (market === "BJ") return "bj";
   // 北交所：43/83/87/88xxxx 老代码，以及 920xxx 新代码（实测 bj920099 有数据、
   // sh920099 无数据）。
   if (/^(4|8)/.test(code) || /^920/.test(code)) return "bj";

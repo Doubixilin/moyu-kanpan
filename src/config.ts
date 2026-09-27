@@ -5,6 +5,7 @@ import {
   parseBossKeyAccelerator
 } from "./shortcut.js";
 import { isSecureApiBaseUrl } from "./domain/runtimeSecurity.js";
+import type { QuoteRequest } from "./domain/types.js";
 
 export const SETTINGS_SCHEMA_VERSION = 8;
 const BOSS_KEY_SCHEMA_VERSION = 5;
@@ -468,6 +469,23 @@ export function activeSecurityCodes(
     for (const code of tab.securityCodes) codes.add(code);
   }
   return [...codes];
+}
+
+/**
+ * 行情请求：把 `activeSecurityCodes()` 的代码逐个配上**显式市场**（审计报告 §3-2）。
+ *
+ * 市场取自归一化后的证券资料（`asSecurityMarket` 已保证与代码前缀一致）；
+ * 万一代码不在 securities 里（历史配置/被截断的导入），退回按前缀推断，
+ * 至少不会把标的发到错误的市场。
+ */
+export function activeQuoteRequests(
+  config: Pick<AppConfig, "holdings" | "watchlist" | "tabs" | "securities">
+): QuoteRequest[] {
+  const markets = new Map(config.securities.map((security) => [security.code, security.market]));
+  return activeSecurityCodes(config).map((code) => ({
+    code,
+    market: markets.get(code) ?? inferSecurityMarket(code)
+  }));
 }
 
 /**

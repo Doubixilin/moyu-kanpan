@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  activeQuoteRequests,
   activeSecurityCodes,
   loadAppConfigFromObject,
   toUserSettings
@@ -18,7 +19,8 @@ if (!preview.valid || !preview.nextSettings) {
 }
 const config = loadAppConfigFromObject(preview.nextSettings, {});
 const codes = activeSecurityCodes(config);
-const result = await fetchQuotesWithFallback(codes, config.providers.quote);
+// 行情请求带显式市场（§3-2）。
+const result = await fetchQuotesWithFallback(activeQuoteRequests(config), config.providers.quote);
 const received = new Set(result.quotes.map((quote) => quote.code));
 const missing = codes.filter((code) => !received.has(code));
 const missingSourceTimes = result.quotes

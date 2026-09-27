@@ -6,6 +6,8 @@ import { MarketDataCoordinator } from "../dist-electron/src/services/marketData.
 import { QuoteCoordinator } from "../dist-electron/src/services/quotes.js";
 
 const codes = ["600519", "000001"];
+// 行情请求现在带显式市场（§3-2）：provider 不再自己按前缀猜。
+const requests = codes.map((code) => ({ code, market: code.startsWith("6") ? "SH" : "SZ" }));
 
 // 这个 smoke **刻意**直连东财（不经回退），所以上游抖动时会失败——这是特性不是 bug。
 // 但未处理的 rejection 会让 Node 在退出清理阶段触发 libuv 断言、丢掉错误正文，
@@ -22,13 +24,13 @@ main().catch((error) => {
 
 async function main() {
   const [eastmoneyQuotes, tencentQuotes, news] = await Promise.all([
-    fetchEastmoneyQuotes(codes),
-    fetchTencentQuotes(codes),
+    fetchEastmoneyQuotes(requests),
+    fetchTencentQuotes(requests),
     fetchEastmoneyFastNews(undefined, 5)
   ]);
   const coordinated = await new QuoteCoordinator(undefined, {
     crossCheckEvery: 1
-  }).fetch(codes, "eastmoney", { marketOpen: false });
+  }).fetch(requests, "eastmoney", { marketOpen: false });
   const marketCoordinator = new MarketDataCoordinator();
   const [marketOverview, marketDetail] = await Promise.all([
     marketCoordinator.fetchOverview("eastmoney", { marketOpen: false }),

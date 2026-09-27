@@ -19,6 +19,18 @@ describe("eastmoney provider", () => {
     assert.equal(buildEastmoneySecid("900001"), "1.900001");
   });
 
+  it("prefers the explicit market over prefix inference", () => {
+    // §3-2：显式市场必须能贯穿到 provider，而不是被前缀推断覆盖。
+    assert.equal(buildEastmoneySecid("920099", "BJ"), "0.920099");
+    assert.equal(buildEastmoneySecid("600519", "SH"), "1.600519");
+    assert.equal(buildEastmoneySecid("000001", "SZ"), "0.000001");
+    // 与推断冲突时以显式市场为准（调用方说了算）
+    assert.equal(buildEastmoneySecid("600519", "SZ"), "0.600519");
+    assert.equal(buildEastmoneySecid("920099", "SH"), "1.920099");
+    // UNKNOWN 视为"没说"，仍然走推断
+    assert.equal(buildEastmoneySecid("600519", "UNKNOWN"), "1.600519");
+  });
+
   it("parses quote list payload into normalized quotes", () => {
     const payload = {
       rc: 0,
