@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { marketPrefixForCode, parseTencentQuoteText } from "../tencent";
+import { fetchTencentQuotes, marketPrefixForCode, parseTencentQuoteText } from "../tencent";
 
 describe("tencent provider", () => {
   it("maps Shanghai ETFs to the Shanghai market prefix", () => {
@@ -24,6 +24,28 @@ describe("tencent provider", () => {
     assert.equal(marketPrefixForCode("600519", "BJ"), "bj");
     assert.equal(marketPrefixForCode("920099", "SH"), "sh");
     assert.equal(marketPrefixForCode("920099", "UNKNOWN"), "bj");
+  });
+
+  it("puts the explicit market into the request URL", async () => {
+    // 断网环境下也能证明"显式市场确实上了请求"：用假 fetcher 抓 URL。
+    const urls: string[] = [];
+    const fetcher = (async (input: string | URL | Request): Promise<Response> => {
+      urls.push(String(input));
+      return new Response("", { status: 200 });
+    }) as typeof fetch;
+
+    await fetchTencentQuotes(
+      [
+        { code: "600519", market: "SH" },
+        { code: "920099", market: "BJ" }
+      ],
+      fetcher
+    );
+    // 腾讯的接口形状是 `/q=sh600519,bj920099`（没有 ?，所以从 pathname 取）
+    assert.equal(new URL(urls[0]!).pathname, "/q=sh600519,bj920099");
+
+    await fetchTencentQuotes([{ code: "920099", market: "SH" }], fetcher);
+    assert.equal(new URL(urls[1]!).pathname, "/q=sh920099");
   });
   it("parses Tencent tilde-delimited quote text", () => {
     // 字段布局按真实响应构造：成交额在 [37]（万元），总市值在 [45]（亿元）。

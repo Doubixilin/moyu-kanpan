@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildEastmoneySecid, parseEastmoneyQuoteList } from "../eastmoney";
+import { buildEastmoneySecid, fetchEastmoneyQuotes, parseEastmoneyQuoteList } from "../eastmoney";
 
 describe("eastmoney provider", () => {
   it("builds Eastmoney secids for A-share codes", () => {
@@ -29,6 +29,29 @@ describe("eastmoney provider", () => {
     assert.equal(buildEastmoneySecid("920099", "SH"), "1.920099");
     // UNKNOWN 视为"没说"，仍然走推断
     assert.equal(buildEastmoneySecid("600519", "UNKNOWN"), "1.600519");
+  });
+
+  it("puts the explicit market into the request URL", async () => {
+    // 断网环境下也要能证明"显式市场确实上了请求"：用假 fetcher 抓 URL。
+    const urls: string[] = [];
+    const fetcher = (async (input: string | URL | Request): Promise<Response> => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ data: { diff: [] } }), { status: 200 });
+    }) as typeof fetch;
+
+    await fetchEastmoneyQuotes(
+      [
+        { code: "600519", market: "SH" },
+        { code: "920099", market: "BJ" }
+      ],
+      fetcher
+    );
+    const secids = new URL(urls[0]!).searchParams.get("secids");
+    assert.equal(secids, "1.600519,0.920099");
+
+    // 与代码前缀冲突时也以显式市场为准
+    await fetchEastmoneyQuotes([{ code: "920099", market: "SH" }], fetcher);
+    assert.equal(new URL(urls[1]!).searchParams.get("secids"), "1.920099");
   });
 
   it("parses quote list payload into normalized quotes", () => {
