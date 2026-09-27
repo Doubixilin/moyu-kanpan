@@ -1,5 +1,11 @@
 import type { PublicSnapshot, PublicTrend } from "./presentation/publicSnapshot.js";
-import { escapeHtml } from "./presentation/format.js";
+import {
+  changeDirection,
+  escapeHtml,
+  formatClockTime,
+  formatSignedPercent,
+  positiveNegativeClass
+} from "./presentation/format.js";
 
 interface WorkContent {
   title: string;
@@ -543,15 +549,11 @@ function number(value: number | null): string {
   return value == null ? "--" : value.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 }
 function percent(value: number | null): string {
-  return value == null ? "--" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+  return formatSignedPercent(value);
 }
 function direction(value: number | null): string {
-  return value == null || value === 0 ? "" : value > 0 ? "positive" : "negative";
+  return positiveNegativeClass(changeDirection(value));
 }
 function formatTime(value: string | null | undefined): string {
-  if (!value) return "--:--";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "--:--"
-    : date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return formatClockTime(value);
 }

@@ -11,7 +11,15 @@ import type {
   HoldingRiskMetrics,
   Quote
 } from "./domain/types";
-import { escapeAttr, escapeHtml } from "./presentation/format.js";
+import {
+  changeDirection,
+  escapeAttr,
+  escapeHtml,
+  formatClockTime,
+  formatClockTimeWithSeconds,
+  formatFixedOrDash,
+  formatSignedPercent
+} from "./presentation/format.js";
 
 const defaultSettings: UserSettings = {
   schemaVersion: 8,
@@ -1243,13 +1251,11 @@ function renderQuoteQuality(quote: Quote | undefined): string {
 }
 
 function quoteDirection(quote: Quote | undefined): string {
-  const value = quote?.changePercent ?? 0;
-  return value > 0 ? "up" : value < 0 ? "down" : "flat";
+  return changeDirection(quote?.changePercent);
 }
 
 function numberDirection(value: number | null | undefined): string {
-  if (value == null || value === 0) return "flat";
-  return value > 0 ? "up" : "down";
+  return changeDirection(value);
 }
 
 function formatQuoteField(quote: Quote | undefined, field: QuoteField): string {
@@ -1263,8 +1269,9 @@ function formatQuoteField(quote: Quote | undefined, field: QuoteField): string {
   return formatNumber(value);
 }
 
+/** 主窗口的价格精度：≤100 保留 3 位（ETF/基金有 3 位报价），>100 用 2 位。 */
 function formatNumber(value: number | null | undefined): string {
-  return value == null ? "--" : value.toFixed(Math.abs(value) > 100 ? 2 : 3);
+  return formatFixedOrDash(value, Math.abs(value ?? 0) > 100 ? 2 : 3);
 }
 
 function formatSigned(value: number | null | undefined): string {
@@ -1273,8 +1280,7 @@ function formatSigned(value: number | null | undefined): string {
 }
 
 function formatPercent(value: number | null | undefined): string {
-  if (value == null) return "--";
-  return (value > 0 ? "+" : "") + value.toFixed(2) + "%";
+  return formatSignedPercent(value);
 }
 
 function formatRLabel(value: number | null | undefined): string {
@@ -1309,22 +1315,9 @@ function formatCompact(value: number | null | undefined, suffix: string, signed 
 }
 
 function formatFeedTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--:--:--";
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  }).format(date);
+  return formatClockTimeWithSeconds(value);
 }
 
 function formatTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--:--";
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).format(date);
+  return formatClockTime(value);
 }

@@ -8,7 +8,11 @@ import {
   type ExcelCustomSheetState
 } from "./presentation/excelCustomSheet.js";
 import { buildExcelBollChart } from "./presentation/excelTrend.js";
-import { escapeHtml } from "./presentation/format.js";
+import {
+  escapeHtml,
+  formatClockTimeWithSeconds,
+  formatFixedOrDash
+} from "./presentation/format.js";
 
 type RibbonTab = "home" | "insert" | "layout" | "formulas" | "data" | "review" | "view";
 
@@ -467,10 +471,7 @@ function cellClasses(
 }
 
 function formatStatusTime(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "--:--"
-    : date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return formatClockTimeWithSeconds(value);
 }
 
 function updateStatusSummary(): void {
@@ -683,7 +684,7 @@ function renderTrendSvg(model: NonNullable<ReturnType<typeof buildExcelBollChart
 }
 
 function formatChartNumber(value: number | null): string {
-  return value == null ? "--" : value.toFixed(2);
+  return formatFixedOrDash(value, 2);
 }
 
 function selectedCell(): HTMLTableCellElement | null {

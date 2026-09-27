@@ -131,6 +131,9 @@
 | 54 | §7-2 依赖审计结论与实测不一致 | `docs/2026-07-11-final-pre-macos-release-audit.md` 把一行"生产依赖及完整依赖树均为 0"拆成两行事实：`--omit=dev` **0 条**；完整树 **8 条**（7 high / 1 moderate：`electron`、`extract-zip`、`tar`、`undici`、`@xmldom/xmldom`、`fast-uri`、`js-yaml`、`brace-expansion`，全部只在 Electron 下载/解包与打包工具链里执行）；并写明本机镜像源会让 `npm audit` 报 `NOT_IMPLEMENTED`——那种情况下"审计通过"与"审计根本没跑起来"看起来完全一样，必须显式加 `--registry=https://registry.npmjs.org` | 在本机实跑两条命令复核：`--omit=dev` → `found 0 vulnerabilities`；完整树 → `{"high":7,"moderate":1,"total":8}` |
 | 55 | `smoke:data` 失败时不可读（工程化小项） | `scripts/smoke-data.mjs` 的顶层 `await` 直接把上游异常抛成 unhandled rejection：Node 24 在退出清理阶段会触发 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`，把真正的错误正文冲掉——"上游挂了"和"代码坏了"在日志里长得一样。现在收口到 `main().catch()`：打印一行 `[smoke:data] 失败：<message>`，识别到 `fetch failed`/`timed out`/`UND_ERR_SOCKET` 时追加"这是上游/网络问题"的提示，并保持退出码 1 | 真实故障验证：本轮 `push2.eastmoney.com` 从本机不可达（`Invoke-WebRequest` 三个域名结果：pulse 端点 `ResponseEnded`、`finance.eastmoney.com` 200），修复前是 libuv 断言崩溃，修复后是上面那三行诊断 + `exit=1` |
 | 56 | §6-4 ② 把 `main.ts` 纯逻辑抽成可测模块 | 新增 `src/domain/newsSelection.ts`（`selectRelevantNews` 相关性标注 + `presentNews` 展示筛选）、`src/domain/alertSeverity.ts`（`ALERT_SEVERITY` 权重表 + `mostSevereAlert`）、`src/domain/aiTestRequest.ts`（AI 测试参数校验）、`src/domain/errors.ts`（`errorMessage`/`upsertError`）；`domain/market.ts` 增 `resolveMarketInstrument`、`settings/profile.ts` 增 `parseProfileRequest`、`config.ts` 增 `parseLocalPreviewPort`。顺带消掉 `settings/controllers/ports.ts` 里同语义的 `describeError`（改为指向 `domain/errors.ts`），并把 `domain/errors.ts` 加入渲染器编译清单与构建契约断言 | `electron/main.ts` 2006 → 1990 行（其余为薄包装），但其中约 **110 行逻辑第一次有了直接测试**：新增 `newsSelection.test.ts`（5 个：标题/摘要匹配、别名与行情名、短关键字与未生效证券、`watchlist_related` 才过滤、`important` 只留有用非低优先级）、`alertSeverity.test.ts`（3 个）、`aiTestRequest.test.ts`（5 个）、`errors.test.ts`（4 个）；扩展 `market.test.ts`/`profile.test.ts`/`config.test.ts` 各 1 组。总测试 248 → **268**，行覆盖率 91.95% → **92.2%**，分支 75.85% → **76.53%** |
+| 57 | §4-7 共享格式化层（时间 / 涨跌方向 / 百分比 / 固定小数） | `presentation/format.ts` 新增 `formatClockTime`、`formatClockTimeWithSeconds`（复用同一个 `Intl` 实例、显式 `hour12: false`）、`changeDirection`（`up/down/flat`）、`positiveNegativeClass`（工作网页与 Excel 用的 `positive/negative/空串`）、`formatFixedOrDash`、`formatSignedPercent`、`DASH`；并迁移 `renderer.ts`（`formatTime`/`formatFeedTime`/`formatNumber`/`formatPercent`/`numberDirection`/`quoteDirection`）、`quickRenderer.ts`（删掉全部 5 个本地包装）、`workRenderer.ts`、`excelRenderer.ts`（`formatStatusTime`/`formatChartNumber`）、`presentation/excelWorkbook.ts`（`formatTime`/`percentOrDash`） | 时间副本 **6 → 1**、涨跌方向 **5 → 1**、带符号百分比 **4 → 1**。行为等价性用真实输出核对过：`toLocaleTimeString("zh-CN", {hour, minute})` 与 `Intl.DateTimeFormat(…, {hour12: false})` 在 0/1/9/12/13/23 点**逐字相同**（Node 24 / Asia/Shanghai），所以时间显示零变化；`formatFixedOrDash` 只统一缺失值占位。新增 `src/presentation/format.test.ts`（5 个用例，用本地时间构造因此不受 CI 时区影响）；构建后 `dist/assets/presentation/format.js` 导出新函数，`quick.js`/`workweb.js`/`excel.js` 三个包都改为 import 它，包内 `toLocaleTimeString` 归零（grep 验证） |
+
+**§4-7 有意未统一的部分（显示口径，不是实现漂移）**：① 价格精度——主窗口对 ≤100 的值保留 3 位（为 ETF/基金的三位报价），速览与工作网页用 2 位；② `QuoteField` 标签表两份（悬浮窗"现价/涨跌/涨幅" vs 设置页勾选项"当前价/涨跌额/涨跌幅"）；③ 金额压缩三套（悬浮窗 1 位亿/万并带符号、Excel 工作表 2 位亿/1 位万、`formatMoney` 千分位）。这三类都会**改变用户看到的文字或数字**，属于需要实机确认的产品决定，不做静默统一。
 
 **这一步的保真点（新测试固定住的行为）**：`upsertError` 按 `scope:` **前缀**去重、上限 4 条（无冒号的字符串因此不会去重，测试显式记录这个既有行为）；`presentNews` 只在 `important` 模式过滤；`parseProfileRequest` 用 `>` 而非 `>=`（正好 2MB 仍接受）；`parseLocalPreviewPort` 只接受 1024–65535 的整数；`normalizeAiTestRequest` 保留"草稿 Key 优先、空白回落已保存凭据"。
 
@@ -370,7 +373,7 @@
 `:81` 的整页重建被约 10 个入口调用（每个 `showMessage` `:1424`、各 busy 开关、7 个 `change` 即重渲染的控件 `:671/:752/:766/:794/:839`）。后果：刚操作的控件焦点/光标丢失；`:520` 的 `<details class="holding-rule-details">` 折叠 → 点击"清空规则"`:957`、"加入持仓"`:1170`、"添加风险组"`:988` 会让用户正在操作的面板收起。作者已意识到焦点问题但只对**一个**控件打了补丁（`focusBossKeyRecorder` `:1379-1381`）。
 > 校准：这**不是**每 tick 发生——`pushSettings` 只在保存流程触发（`main.ts:1655`），`onSettings` 被 `settingsDirty` 正确守卫（`:1489`，这点写得好）。
 
-### 4-7 【中】重复实现：15 类辅助函数，且两个同名 `escapeHtml` 语义不同
+### 4-7 【中】重复实现：15 类辅助函数，且两个同名 `escapeHtml` 语义不同 —— 第一/二批已修（见 §0.1 #46/#57）
 
 | 函数 | 份数 | 位置 |
 | --- | --- | --- |
@@ -384,6 +387,7 @@
 
 **已有的共享层被绕过**：`src/config.ts` 已导出 `securityForCode()`(`:411`)、`displayNameForCode()`(`:418`)、`inferSecurityMarket()`(`:427`)、`activeSecurityCodes()`(`:394`)、`QUOTE_FIELDS`(`:14`)、`TAB_TYPES`(`:19`)，但 `renderer.ts:940`/`settingsRenderer.ts:1404` 各自重写 `securityFor`，`settingsRenderer.ts:1408` 与 `inferSecurityMarket` 逐字节相同；`alias || name || quote.name || code` 链出现 **9 次**。另有两处用户可见不一致：`QuoteField` 标签表两份（`renderer.ts:177-188` "现价/涨跌/涨幅" vs `settingsRenderer.ts:19-30` "当前价/涨跌额/涨跌幅"）；同一价格精度不同（`renderer.ts:1147` 对 ≤100 的价用 3 位小数，`quickRenderer.ts:68`/`workRenderer.ts:404` 用 2 位）→ 12.345 在悬浮窗显示 "12.345"、在速览显示 "12.35"。
 - 修复：新建 `src/presentation/format.ts` + `src/renderer/dom.ts`，5 个渲染器统一迁移（约减 450 行），同时消除上述不一致。
+  - **进度**：`presentation/format.ts` 已建立并完成两批迁移——① 转义（#46，5 份 → 1，且两套同名不同语义的 `escapeHtml` 合并）；② 时间/涨跌方向/带符号百分比/固定小数（#57，分别 6→1、5→1、4→1）。**未做**：`src/renderer/dom.ts`（DOM 查询辅助）与表格里那三类**显示口径**的差异（价格精度、`QuoteField` 标签表、金额压缩三套）——后者改动会改变用户看到的文字，留待实机确认，见 §0.1 #57 末尾。
 
 ### 4-8 【中】43 个模块级可变绑定，同一事实多份拷贝
 

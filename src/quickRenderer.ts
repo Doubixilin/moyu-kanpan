@@ -1,5 +1,11 @@
-import type { AppSnapshot, Quote } from "./domain/types.js";
-import { escapeHtml } from "./presentation/format.js";
+import type { AppSnapshot } from "./domain/types.js";
+import {
+  changeDirection,
+  escapeHtml,
+  formatClockTime,
+  formatFixedOrDash,
+  formatSignedPercent
+} from "./presentation/format.js";
 
 const root = document.querySelector<HTMLDivElement>("#quick-root");
 if (!root) throw new Error("Missing quick root");
@@ -21,13 +27,13 @@ const status = required("#quick-status");
 const time = required("#quick-time");
 
 function update(snapshot: AppSnapshot): void {
-  time.textContent = formatTime(snapshot.updatedAt);
+  time.textContent = formatClockTime(snapshot.updatedAt);
   indices.innerHTML =
     snapshot.market.indices
       .slice(0, 3)
       .map(
         (item) => `
-    <div class="index ${direction(item.changePercent)}"><small>${escapeHtml(item.instrument.name)}</small><strong>${formatNumber(item.price)}</strong><span>${formatPercent(item.changePercent)}</span></div>
+    <div class="index ${changeDirection(item.changePercent)}"><small>${escapeHtml(item.instrument.name)}</small><strong>${formatFixedOrDash(item.price, 2)}</strong><span>${formatSignedPercent(item.changePercent)}</span></div>
   `
       )
       .join("") || '<div class="empty">指数等待更新</div>';
@@ -44,7 +50,7 @@ function update(snapshot: AppSnapshot): void {
       const quote = quoteMap.get(item.securityCode);
       const security = securityMap.get(item.securityCode);
       const name = security?.alias || security?.name || quote?.name || item.securityCode;
-      return `<div class="quote ${direction(quote?.changePercent ?? null)}"><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(item.securityCode)}</small></span><b>${formatQuotePrice(quote)}</b><em>${formatPercent(quote?.changePercent ?? null)}</em></div>`;
+      return `<div class="quote ${changeDirection(quote?.changePercent ?? null)}"><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(item.securityCode)}</small></span><b>${formatFixedOrDash(quote?.price, 2)}</b><em>${formatSignedPercent(quote?.changePercent ?? null)}</em></div>`;
     });
   quotes.innerHTML = rows.join("") || '<div class="empty">暂无重点项目</div>';
 
@@ -55,7 +61,7 @@ function update(snapshot: AppSnapshot): void {
   status.textContent =
     feed.degraded || feed.stale
       ? "行情待核验"
-      : `${feed.source ?? "行情"} · ${formatTime(feed.lastSuccessAt)}`;
+      : `${feed.source ?? "行情"} · ${formatClockTime(feed.lastSuccessAt)}`;
   document.documentElement.dataset.state = feed.degraded || feed.stale ? "degraded" : "ready";
 }
 
@@ -69,30 +75,6 @@ function required(selector: string): HTMLElement {
   const element = rootElement.querySelector<HTMLElement>(selector);
   if (!element) throw new Error(`Missing ${selector}`);
   return element;
-}
-
-function direction(value: number | null): string {
-  return value == null || value === 0 ? "flat" : value > 0 ? "up" : "down";
-}
-
-function formatNumber(value: number | null): string {
-  return value == null ? "--" : value.toFixed(2);
-}
-
-function formatQuotePrice(quote: Quote | undefined): string {
-  return quote?.price == null ? "--" : quote.price.toFixed(2);
-}
-
-function formatPercent(value: number | null): string {
-  return value == null ? "--" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
-}
-
-function formatTime(value: string | null): string {
-  if (!value) return "--:--";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "--:--"
-    : date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
 void window.floatingStock?.getSnapshot().then(update);

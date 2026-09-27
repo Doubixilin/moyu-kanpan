@@ -1,4 +1,5 @@
 import type { AppSnapshot, Quote, QuoteQualityState } from "../domain/types.js";
+import { formatClockTime, formatSignedPercent } from "./format.js";
 
 export interface ExcelSheetData {
   id: "overview" | "tracking" | "activity" | "custom" | "trend";
@@ -145,7 +146,7 @@ function numberOrDash(value: number | null | undefined): string | number {
 }
 
 function percentOrDash(value: number | null | undefined): string {
-  return value == null ? "--" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+  return formatSignedPercent(value);
 }
 
 function compactAmount(value: number | null | undefined): string {
@@ -156,11 +157,7 @@ function compactAmount(value: number | null | undefined): string {
 }
 
 function formatTime(value: string | undefined): string {
-  if (!value) return "--:--";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "--:--"
-    : date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return formatClockTime(value);
 }
 
 function qualityLabel(state: QuoteQualityState | undefined): string {
