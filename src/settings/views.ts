@@ -323,8 +323,25 @@ export interface ProfilePanelState {
   busy: boolean;
 }
 
-export function renderProfilePanel(state: ProfilePanelState): string {
+/**
+ * 配置导入面板里**随草稿变化**的那部分（操作按钮 + 预览结果）。
+ *
+ * 单独拆出来是为了定点更新：用户在文本框里改一个字符时，只需要重建这一块，
+ * 不必整页重渲染（否则文本框会失焦，而且旧预览会留在屏幕上说谎，见审计报告 §4-8）。
+ */
+export function renderProfileLiveRegion(state: ProfilePanelState): string {
   const { preview } = state;
+  return `
+    <div class="profile-actions">
+      <button type="button" data-action="preview-profile" ${state.busy || !state.text.trim() ? "disabled" : ""}>${state.busy ? "处理中…" : "预览差异"}</button>
+      <button type="button" class="primary" data-action="apply-profile" ${state.busy || !preview?.valid || !preview.hasChanges ? "disabled" : ""}>确认导入</button>
+      <button type="button" data-action="clear-profile" ${state.busy || !state.text ? "disabled" : ""}>清空</button>
+    </div>
+    ${preview ? renderProfilePreview(preview) : '<div class="profile-empty">导入前不会修改任何设置。先预览差异，再确认保存。</div>'}
+  `;
+}
+
+export function renderProfilePanel(state: ProfilePanelState): string {
   return `
     <section class="panel profile-panel ${settingsPageClass("data", state.activePage)}">
       <div class="panel-heading">
@@ -351,12 +368,7 @@ export function renderProfilePanel(state: ProfilePanelState): string {
         <span>粘贴 AI 返回的 JSON，或选择文件</span>
         <textarea data-setting="profile-text" spellcheck="false" placeholder="{&#10;  &quot;profileVersion&quot;: 1,&#10;  ...&#10;}">${escapeHtml(state.text)}</textarea>
       </label>
-      <div class="profile-actions">
-        <button type="button" data-action="preview-profile" ${state.busy || !state.text.trim() ? "disabled" : ""}>${state.busy ? "处理中…" : "预览差异"}</button>
-        <button type="button" class="primary" data-action="apply-profile" ${state.busy || !preview?.valid || !preview.hasChanges ? "disabled" : ""}>确认导入</button>
-        <button type="button" data-action="clear-profile" ${state.busy || !state.text ? "disabled" : ""}>清空</button>
-      </div>
-      ${preview ? renderProfilePreview(preview) : '<div class="profile-empty">导入前不会修改任何设置。先预览差异，再确认保存。</div>'}
+      <div id="profile-live">${renderProfileLiveRegion(state)}</div>
     </section>
   `;
 }

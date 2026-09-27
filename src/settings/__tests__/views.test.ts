@@ -14,6 +14,7 @@ import {
   option,
   renderAddHolding,
   renderHoldingSetting,
+  renderProfileLiveRegion,
   renderProfilePanel,
   renderProfilePreview,
   renderRiskGroupSetting,
@@ -312,6 +313,35 @@ describe("settings view builders", () => {
     assert.match(ready, /600519/);
     assert.equal(ready.includes("profile-empty"), false);
     assert.equal(/data-action="preview-profile" disabled/.test(ready), false);
+  });
+
+  it("renders the draft-dependent profile region on its own", () => {
+    // 这一块会被定点更新（用户改草稿时只重建它），所以必须能脱离整页单独构造。
+    const blank = renderProfileLiveRegion({ ...EMPTY_PANEL_STATE, activePage: "data" });
+    assert.match(blank, /data-action="preview-profile" disabled/);
+    assert.match(blank, /data-action="clear-profile" disabled/);
+    assert.match(blank, /profile-empty/);
+
+    const typed = renderProfileLiveRegion({
+      ...EMPTY_PANEL_STATE,
+      activePage: "data",
+      text: "{}"
+    });
+    // 有草稿时预览与清空都必须可用，否则用户粘贴 JSON 后无从预览
+    assert.equal(/data-action="preview-profile" disabled/.test(typed), false);
+    assert.equal(/data-action="clear-profile" disabled/.test(typed), false);
+    assert.match(typed, /data-action="apply-profile" disabled/);
+    assert.equal(typed.includes("profile-empty"), true);
+
+    const previewed = renderProfileLiveRegion({
+      ...EMPTY_PANEL_STATE,
+      activePage: "data",
+      text: "{}",
+      preview: preview()
+    });
+    assert.equal(previewed.includes("profile-diff-grid"), true);
+    assert.equal(previewed.includes("profile-empty"), false);
+    assert.equal(/data-action="apply-profile" disabled/.test(previewed), false);
   });
 });
 

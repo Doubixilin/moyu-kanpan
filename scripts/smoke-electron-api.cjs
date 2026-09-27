@@ -217,6 +217,25 @@ async function main() {
     ];
     ipcMain.handle("settings:get", () => smokeSettings);
     ipcMain.handle("profile:hasBackup", () => false);
+    // 固定返回"校验通过且有变化"，让预览/确认导入按钮都进入可用状态。
+    ipcMain.handle("profile:preview", (_event, request) => ({
+      valid: true,
+      hasChanges: true,
+      mode: request?.mode === "replace" ? "replace" : "merge",
+      issues: [],
+      diff: {
+        securitiesAdded: [],
+        securitiesUpdated: [],
+        holdingsAdded: [],
+        holdingsUpdated: [],
+        holdingsRemoved: [],
+        watchlistAdded: [],
+        watchlistUpdated: [],
+        watchlistRemoved: [],
+        alertRuleChanges: 0,
+        riskSettingsChanged: false
+      }
+    }));
     ipcMain.handle("ai:status", () => ({
       enabled: false,
       configured: false,
@@ -404,6 +423,107 @@ async function main() {
         throw new Error(`滚动位置从 ${scrollKept.before} 变为 ${scrollKept.after}`);
       }
       return `scrollY=${scrollKept.after}`;
+    });
+
+    // —— §4-8：改了草稿后旧预览仍在屏幕上"说谎" ——
+    const readProfileRegion = `
+      (() => {
+        const live = document.getElementById('profile-live');
+        const apply = document.querySelector('button[data-action="apply-profile"]');
+        const textarea = document.querySelector('textarea[data-setting="profile-text"]');
+        return {
+          hasPreview: Boolean(live && live.querySelector('.profile-diff-grid')),
+          hasEmptyHint: Boolean(live && live.querySelector('.profile-empty')),
+          applyDisabled: apply ? apply.disabled : null,
+          focused: document.activeElement === textarea,
+          caret: textarea ? textarea.selectionStart : null
+        };
+      })()
+    `;
+
+    await evaluate(`
+      (() => {
+        document.querySelector('button[data-action="settings-page"][data-page="data"]').click();
+        return true;
+      })()
+    `);
+    await delay(200);
+
+    // 先把草稿敲进去：草稿一变，依赖草稿的整块（按钮禁用态 + 预览）都必须立刻跟上。
+    const typed = await evaluate(`
+      (() => {
+        const textarea = document.querySelector('textarea[data-setting="profile-text"]');
+        textarea.value = '{"profileVersion":1}';
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return {
+          previewDisabled: document.querySelector('button[data-action="preview-profile"]').disabled,
+          clearDisabled: document.querySelector('button[data-action="clear-profile"]').disabled
+        };
+      })()
+    `);
+    check("输入草稿后预览/清空按钮立即可用（§4-8）", () => {
+      if (typed.previewDisabled) throw new Error("敲进 JSON 后'预览差异'仍是禁用的，用户无从预览");
+      if (typed.clearDisabled) throw new Error("'清空'仍是禁用的");
+      return "预览/清空按钮已启用";
+    });
+
+    await evaluate(`
+      (() => {
+        document.querySelector('button[data-action="preview-profile"]').click();
+        return true;
+      })()
+    `);
+    await delay(300);
+    const previewed = await evaluate(readProfileRegion);
+    check("预览成功后按钮进入可用状态", () => {
+      if (!previewed.hasPreview) throw new Error("预览结果没有渲染");
+      if (previewed.applyDisabled !== false) throw new Error("确认导入仍不可用");
+      return "预览可见 + 确认导入可用";
+    });
+
+    // 改一个字符：预览必须立刻失效、确认导入必须立刻禁用，同时光标不能丢
+    const edited = await evaluate(`
+      (() => {
+        const state = () => {
+          const live = document.getElementById('profile-live');
+          if (!live) return 'missing';
+          if (live.querySelector('.profile-diff-grid')) return 'preview';
+          if (live.querySelector('.profile-empty')) return 'empty';
+          return 'other';
+        };
+        const before = state();
+        const textarea = document.querySelector('textarea[data-setting="profile-text"]');
+        // 先改值再定位光标：直接赋 value 会把光标顶到末尾
+        textarea.value = '{"profileVersion":1} ';
+        textarea.focus();
+        textarea.setSelectionRange(3, 3);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                before,
+                hasPreview: Boolean(document.querySelector('#profile-live .profile-diff-grid')),
+                hasEmptyHint: Boolean(document.querySelector('#profile-live .profile-empty')),
+                applyDisabled: document.querySelector('button[data-action="apply-profile"]').disabled,
+                focused: document.activeElement === textarea,
+                caret: textarea === document.activeElement ? textarea.selectionStart : null
+              }),
+            200
+          )
+        );
+      })()
+    `);
+    check("改动草稿后旧预览立即失效且不丢光标（§4-8）", () => {
+      // 前置条件：改动之前屏幕上确实有一份预览，否则这条检查会"空过"
+      if (edited.before !== "preview")
+        throw new Error("改动前没有预览，检查不成立：" + edited.before);
+      if (edited.hasPreview) throw new Error("旧预览仍留在屏幕上");
+      if (!edited.hasEmptyHint) throw new Error("未显示'导入前不会修改任何设置'占位");
+      if (edited.applyDisabled !== true) throw new Error("确认导入仍可点击");
+      if (!edited.focused) throw new Error("文本框失去焦点");
+      if (edited.caret !== 3) throw new Error("光标位置丢失，caret=" + edited.caret);
+      return "预览已清空 + 确认导入禁用 + 光标保持";
     });
 
     // 其余 4 个渲染器都是模块顶层同步写首屏标记，因此"根节点有子元素"就等价于

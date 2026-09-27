@@ -24,6 +24,7 @@ import {
   option,
   renderAddHolding,
   renderHoldingSetting,
+  renderProfileLiveRegion,
   renderProfilePanel,
   renderRiskGroupSetting,
   renderSettingsNavigation,
@@ -127,14 +128,7 @@ function render(): void {
 
       ${renderSettingsNavigation(activeSettingsPage)}
 
-      ${renderProfilePanel({
-        activePage: activeSettingsPage,
-        preview: profile.preview,
-        hasProfileBackup: profile.hasBackup,
-        mode: profile.mode,
-        text: profile.text,
-        busy: profile.busy
-      })}
+      ${renderProfilePanel(profilePanelState())}
 
       <section class="panel ${settingsPageClass("general", activeSettingsPage)}">
         <div class="panel-heading">
@@ -469,6 +463,9 @@ function handleFormChange(event: Event): void {
   // 这三个字段改的是渲染层自身的状态（草稿文本/模式/文件），不属于 settings。
   if (setting === "profile-text") {
     profile.setText(target.value);
+    // 定点更新：改草稿会让旧预览失效，必须把预览区/按钮状态刷新掉，
+    // 但又不能整页重渲染（否则每敲一个字符就丢焦点，见 §4-8 最后一段）。
+    updateProfileLiveRegion();
     return;
   }
   // API Key 不写入 settings（由主进程用系统安全存储加密），只暂存在渲染层。
@@ -479,7 +476,7 @@ function handleFormChange(event: Event): void {
   }
   if (setting === "profile-mode") {
     profile.setMode(target.value);
-    if (event.type === "change") render();
+    if (event.type === "change") updateProfileLiveRegion();
     return;
   }
   if (setting === "profile-file") {
@@ -976,6 +973,34 @@ function updateMessage(): void {
     ? `<div class="message ${escapeHtml(messageKind)}">${escapeHtml(message)}</div>`
     : "";
   slot.hidden = !message;
+}
+
+/**
+ * 只更新配置导入面板里"随草稿变化"的那一块（按钮禁用态 + 预览结果）。
+ *
+ * 用户在文本框里改动一个字符时，旧预览已经失效——不刷新会让屏幕上的差异、
+ * "确认导入"的可用状态都与真实情况不符（§4-8 记录的"UI 说谎"）。
+ * 定点更新既修掉了这个不一致，又不会像整页重渲染那样把光标顶掉。
+ */
+function updateProfileLiveRegion(): void {
+  const slot = document.getElementById("profile-live");
+  if (!slot) {
+    render();
+    return;
+  }
+  slot.innerHTML = renderProfileLiveRegion(profilePanelState());
+}
+
+/** 配置导入面板当前状态（每次读实时值，避免到处复制字段）。 */
+function profilePanelState() {
+  return {
+    activePage: activeSettingsPage,
+    preview: profile.preview,
+    hasProfileBackup: profile.hasBackup,
+    mode: profile.mode,
+    text: profile.text,
+    busy: profile.busy
+  };
 }
 
 function showMessage(value: string, kind: "ok" | "error"): void {
