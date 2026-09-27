@@ -1498,9 +1498,11 @@ function registerIpc(): void {
     // 只放行无 userinfo 的 https：明文 http 会把用户送到可被篡改的页面上。
     if (isExternalLinkAllowed(url)) await shell.openExternal(url as string);
   });
-  handleTrusted("news:copyContext", (_event, eventId: unknown) => {
+  handleTrusted("news:copyContext", async (_event, eventId: unknown) => {
     const text = sanitizedContextForEvent(eventId);
-    clipboard.writeText(text);
+    // Electron 44 起 clipboard 写入是异步的（对齐 W3C navigator.clipboard）：
+    // 必须 await 后再回"已复制"，否则提示与真实结果可能不一致。
+    await clipboard.writeText(text);
     return "已复制脱敏上下文";
   });
   handleTrusted("profile:preview", (_event, value: unknown) => {
@@ -1517,12 +1519,12 @@ function registerIpc(): void {
     const saved = await saveSettings(preview.nextSettings);
     return { settings: saved, preview: { ...preview, nextSettings: undefined }, backupCreated };
   });
-  handleTrusted("profile:copyPrompt", () => {
-    clipboard.writeText(profilePrompt());
+  handleTrusted("profile:copyPrompt", async () => {
+    await clipboard.writeText(profilePrompt());
     return "已复制配置包提示词";
   });
-  handleTrusted("profile:copyExport", () => {
-    clipboard.writeText(exportProfile(settingsForRenderer(config)));
+  handleTrusted("profile:copyExport", async () => {
+    await clipboard.writeText(exportProfile(settingsForRenderer(config)));
     return "已复制当前配置包";
   });
   handleTrusted("profile:hasBackup", () => settingsStore.hasImportBackup());

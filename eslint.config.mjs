@@ -69,8 +69,10 @@ export default tseslint.config(
   },
 
   // 构建脚本与配置文件不在任何 tsconfig 项目中，关闭类型感知规则。
+  // `.cjs` 也在内：`scripts/smoke-electron-api.cjs` 必须是 CommonJS（Electron 主进程
+  // 只有 CJS 入口里的 require("electron") 才解析成内置模块）。
   {
-    files: ["scripts/**/*.mjs", "*.mjs"],
+    files: ["scripts/**/*.mjs", "scripts/**/*.cjs", "*.mjs"],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
       globals: {
