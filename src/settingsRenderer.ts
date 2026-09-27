@@ -58,8 +58,11 @@ const tabTypeLabels: Record<TabType, string> = {
 };
 
 let settings: UserSettings | null = null;
-let message = "";
-let messageKind: "ok" | "error" | "" = "";
+/**
+ * 当前提示。文本与种类合成一个对象：分开存时每处都要写两行，漏一行就会渲染出
+ * `class="message "` 这种没样式的提示（审计报告 §4-8）。
+ */
+let uiMessage: { text: string; kind: "ok" | "error" } | null = null;
 let recordingBossKey = false;
 let activeSettingsPage: SettingsPage = "general";
 let settingsDirty = false;
@@ -70,10 +73,7 @@ const ai = new AiSettingsController({
   ipc: () => window.floatingStock ?? null,
   render,
   notify: showMessage,
-  clearMessage: () => {
-    message = "";
-    messageKind = "";
-  }
+  clearMessage
 });
 
 const profile = new ProfileImportController({
@@ -81,10 +81,7 @@ const profile = new ProfileImportController({
   confirm: (text) => window.confirm(text),
   render,
   notify: showMessage,
-  clearMessage: () => {
-    message = "";
-    messageKind = "";
-  },
+  clearMessage,
   applySettings: (next, backupCreated) => {
     settings = next;
     settingsDirty = false;
@@ -120,9 +117,9 @@ function render(): void {
         <button class="primary" data-action="save">保存设置</button>
       </header>
 
-      <div id="settings-message" role="status" aria-live="polite" ${message ? "" : "hidden"}>${
-        message
-          ? `<div class="message ${escapeHtml(messageKind)}">${escapeHtml(message)}</div>`
+      <div id="settings-message" role="status" aria-live="polite" ${uiMessage ? "" : "hidden"}>${
+        uiMessage
+          ? `<div class="message ${escapeHtml(uiMessage.kind)}">${escapeHtml(uiMessage.text)}</div>`
           : ""
       }</div>
 
@@ -561,8 +558,7 @@ async function handleClick(event: Event): Promise<void> {
 
   if (action === "record-boss-key") {
     recordingBossKey = true;
-    message = "";
-    messageKind = "";
+    clearMessage();
     render();
     focusBossKeyRecorder();
     return;
@@ -780,8 +776,7 @@ function addStock(): void {
     order: settings.watchlist.length,
     groupId: "all"
   });
-  message = "";
-  messageKind = "";
+  clearMessage();
   render();
 }
 
@@ -969,10 +964,10 @@ function updateMessage(): void {
     render();
     return;
   }
-  slot.innerHTML = message
-    ? `<div class="message ${escapeHtml(messageKind)}">${escapeHtml(message)}</div>`
+  slot.innerHTML = uiMessage
+    ? `<div class="message ${escapeHtml(uiMessage.kind)}">${escapeHtml(uiMessage.text)}</div>`
     : "";
-  slot.hidden = !message;
+  slot.hidden = !uiMessage;
 }
 
 /**
@@ -1004,9 +999,13 @@ function profilePanelState() {
 }
 
 function showMessage(value: string, kind: "ok" | "error"): void {
-  message = value;
-  messageKind = kind;
+  uiMessage = { text: value, kind };
   updateMessage();
+}
+
+/** 只清空提示状态，不重渲染（与端口约定一致：调用方随后自行 `render()`）。 */
+function clearMessage(): void {
+  uiMessage = null;
 }
 
 render();

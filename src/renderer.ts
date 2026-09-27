@@ -1113,6 +1113,9 @@ async function handleRootClick(event: MouseEvent): Promise<void> {
     clickThrough = requested;
     try {
       await window.floatingStock?.toggleClickThrough(requested);
+      // 成功后立刻重绘：否则按钮的 active/aria-pressed 会停在旧值，直到下一次快照推送
+      // （审计报告 §4-8：同一个事实在模块变量、主进程配置与 DOM 里有三份拷贝）。
+      render(snapshot);
     } catch {
       // 回滚乐观更新，避免按钮 aria-pressed 与实际点击穿透状态不一致。
       clickThrough = !requested;

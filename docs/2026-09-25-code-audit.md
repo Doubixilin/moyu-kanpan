@@ -135,6 +135,7 @@
 | 58 | **Phase F：§7-1 Electron 39 → 44** | `package.json`：`electron ^39.2.7` → **`^44.4.5`**（实装 44.4.5 = Chromium **152** / Node **24.21.0**，Electron 39 的 39.8.10 是 Chromium 142 / Node 22.20）。升级暴露一处**真实的 API 变更**：Electron 44 把 `clipboard` 对齐 W3C `navigator.clipboard`，`writeText` 变成**异步**，`news:copyContext`/`profile:copyPrompt`/`profile:copyExport` 三个 handler 因此改为 `async` + `await`（`@typescript-eslint/no-floating-promises` 直接报出来了）；`eslint.config.mjs` 把 `scripts/**/*.cjs` 纳入 node globals 段。新增 **`scripts/smoke-electron-api.cjs`** + `npm run smoke:electron`：用 `show:false` 的隐藏窗口把升级后真正依赖的 Electron 能力跑一遍（**不会把窗口弹到用户桌面上**） | 实测输出（`exit=0`，**13/13 通过**）：`electron 44.4.5 / node 24.21.0 / chrome 152.0.7977.130`；`screen` 工作区 1440×852；`safeStorage` 加密往返一致；`node:sqlite` insert/select 正常（Electron 39 的 Node 22 只是实验性支持，现在更稳）；默认老板键 `CommandOrControl+Alt+Space` 注册/注销成功；`Tray` + 上下文菜单创建/销毁正常；透明+无边框+`alwaysOnTop("screen-saver")`+点击穿透+锁定组合可用（`visible=false alwaysOnTop=true`）；**5 个渲染器全部在 Chromium 152 下执行首屏**（设置页 43 个 `data-action` 控件、悬浮窗/速览/月度工作台/项目工作网页根节点均有子元素），且 `contextBridge` 正常暴露 `floatingStock.saveSettings`。另有 `npm run verify`（273 测试）与 `smoke:news`/`smoke:profile` 通过 |
 | 59 | §4-6 整页重渲染的连带 bug（焦点/光标/面板收起） | 两处改动：① **提示改为定点更新**——模板里新增固定槽位 `<div id="settings-message" role="status" aria-live="polite">`，`showMessage` 改成 `updateMessage()` 只替换槽位内容（首屏尚未渲染时退化为整页渲染）。提示是最高频的反馈（保存、清空规则、字段超限、导入结果），此前每次都触发整页重建；② **整页重建时保留界面状态**——新增 `src/settings/uiState.ts`（`uiKey`/`captureUiState`/`restoreUiState`），用 `data-setting`/`data-action`+行索引拼稳定 key，在 `render()` 换 innerHTML 前后搬运"哪些 `details` 开着、焦点在哪个控件、光标/选区位置、滚动位置"（`focus({preventScroll:true})` 后再恢复滚动；number/checkbox 不支持 `setSelectionRange` 时只恢复焦点） | **先复现再修复**：把新的交互检查加进 `npm run smoke:electron`（隐藏窗口 + 真实设置页 + 真实事件），修复前实测 **FAIL**：`提示类操作…→ 展开的 details 被收起`、`必要整页重渲染…→ 重渲染后焦点丢失，activeElement=BODY`；修复后同两条 **PASS**（`焦点/光标/面板 open/提示均保留`、`focus=holding-note caret=1`）。冒烟总数 13 → **18 项，全部通过**；`npm run verify`（273 测试）与 `smoke:news`/`smoke:profile` 通过。顺带修掉一个诊断坑：隐藏窗口里 `display:none` 分区中的输入框无法获得焦点，冒烟因此先切到"持仓与提醒"分类再断言 |
 | 60 | §4-8 配置导入面板的"UI 说谎"（比报告描述更严重） | 把依赖草稿的那一块从整页模板里拆成 `renderProfileLiveRegion(state)`（`views.ts`，含三个操作按钮 + 预览结果/占位），模板里给它固定容器 `<div id="profile-live">`；`settingsRenderer.ts` 新增 `updateProfileLiveRegion()`，在 `profile-text` 的 `input` 与 `profile-mode` 的 `change` 上**定点重建**该容器（不再整页重渲染，因此光标不丢） | **先复现再修复**（临时关掉修复后重建、跑同一条冒烟）：`输入草稿后预览/清空按钮立即可用（§4-8）→ FAIL：敲进 JSON 后'预览差异'仍是禁用的，用户无从预览`（连带 `预览成功后按钮进入可用状态 → 预览结果没有渲染`、`改动草稿后…→ 改动前没有预览，检查不成立`）。修复后三条全 **PASS**：`预览/清空按钮已启用`、`预览可见 + 确认导入可用`、`预览已清空 + 确认导入禁用 + 光标保持`。冒烟 18 → **20 项全部通过**；`views.test.ts` 增 1 组用例（`renderProfileLiveRegion` 三种状态）→ 总测试 **274**；`npm run verify` 与 `smoke:news`/`smoke:profile` 通过 |
+| 61 | §4-10 调色板护栏 + 首层 CSS token | ① 新增 `src/presentation/cssPalette.ts`：纯解析器（剥注释后统计 hex/rgb/hsl 字面量、配对 `var(--x)` 的定义与使用、给出热点色）。② 新增 `src/presentation/cssPalette.test.ts`：**去重颜色种类数是"只降不升"的预算**——`styles.css 75 / settings.css 86 / quick.css 15 / excel.css 71 / workweb.css 85`（实测值），任何人再随手加一个近似色都会让 `npm test` 失败并提示先复用或与设计一起收敛；同时断言每个文件里用到的 `var(--x)` 都有定义（拼错的变量会让整条声明静默失效）。③ `settings.css` 顶部建立首层 token：`--text`/`--text-muted`/`--text-faint`/`--surface`/`--surface-subtle`/`--line`/`--on-accent` | 替换 30 处**取值完全一致**的高频字面量（`color: #4f555d`×5、`#777d85`×5、`#8a8f96`×6、`border: 1px solid #d8dbe0`×5、`background: #f8f9fa`×4、`#fff`×5），逐个核对过使用场景（那 6 个 `#8a8f96` 全部用在 `color:`、5 个 `#d8dbe0` 全部用在同一种 border 上），因此**视觉零变化**（token 值与原文一致，替换后文件里只剩定义处）。测试 274 → **282**（解析器 3 个 + 5 个文件预算 + 之前的）；`npm run verify` 与 `smoke:electron`（20/20，5 个页面在真 Chromium 下重新首屏）通过 |
 
 **关于第 60 条的额外发现**：这意味着原报告把症状（旧预览残留）当成了问题，真正的问题是"草稿依赖区只在整页重渲染时更新"。修复后顺带消除了一个用户可见的死路：粘贴 JSON 后不必再靠"动别的字段"来逼出一次重渲染。
 
@@ -158,8 +159,13 @@
 
 **尚未处理**（按报告路线图，需要更大改动或人工验证）：
 
-- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分三步已完成（1398 → 979 行），§4-6（整页重渲染丢焦点/收面板）已修（#59），§4-8 里配置导入面板的"UI 说谎"已修（#60），§4-7 的共享格式化层已完成两批（#46/#57）。剩下：§4-7 里**有意未统一**的三类显示口径（价格精度、`QuoteField` 标签、金额压缩，见下）、§4-8 剩余的模块级状态（`settings`/`message`/`recordingBossKey`/`activeSettingsPage`/`settingsDirty`）、以及 §4-10 的 CSS token 层（`settings.css` 127 处硬编码色值）。
-- **Phase F（GUI 相关，最后）**：§7-1 Electron 已升到 **44.4.5**（Chromium 152 / Node 24.21），并新增 `npm run smoke:electron`（隐藏窗口跑 13 项运行时 API 检查，本次全通过，见 §0.1 #58）。**仍需人工在实机过一遍**：透明度/圆角观感、托盘菜单交互、老板键跨应用隐藏/呼出、点击穿透手感、通知投递，以及 `npm run package:win` 的 Electron 44 打包与安装。
+- **Phase E 剩余（GUI 相关）**：`settingsRenderer.ts` 拆分三步已完成（1398 → 979 行），§4-6（整页重渲染丢焦点/收面板）已修（#59），§4-8 里配置导入面板的"UI 说谎"已修（#60），§4-7 的共享格式化层已完成两批（#46/#57），§4-10 已建调色板护栏与首层 token（#61）。**剩下的都需要设计/产品确认**（见下），并建议在实机上做一次视觉回归。
+- **Phase F（GUI 相关，最后）**：§7-1 Electron 已升到 **44.4.5**（Chromium 152 / Node 24.21），并新增 `npm run smoke:electron`（隐藏窗口跑 **20 项**运行时 API + 交互检查，本次全通过，见 §0.1 #58/#59/#60）。**仍需人工在实机过一遍**：透明度/圆角观感、托盘菜单交互、老板键跨应用隐藏/呼出、点击穿透手感、通知投递，以及 `npm run package:win` 的 Electron 44 打包与安装。
+- **需要产品/设计确认后才能继续的 3 项**（都会改变用户看到的颜色或文字，因此没有静默改）：
+  1. **涨跌语义色统一**（§4-10）：`styles.css` 用 `#ff6b6b`/`#4ecdc4`、`quick.css` 用 `#ad3b38`/`#287a52`、Excel 用 `#107c41`；另外 `data-theme="stealth"` 只作用于悬浮窗（`quickRenderer` 从不设置 `dataset.theme`）。
+  2. **价格精度统一**（§4-7）：悬浮窗对 ≤100 的值保留 3 位（为 ETF/基金的三位报价），速览/工作网页用 2 位。
+  3. **文案与金额口径统一**（§4-7）：`QuoteField` 标签两份（"现价/涨跌/涨幅" vs "当前价/涨跌额/涨跌幅"）；金额压缩三套（悬浮窗 1 位亿/万带符号、Excel 2 位亿/1 位万、`formatMoney` 千分位）。
+  4. **近似灰合并**（§4-10）：`settings.css` 的 13 个近似灰（如 `#8a8f96`/`#858a91`/`#858b93`）目前承担 4 种用途；合并需要定一套灰阶。
 - **其余未做（有意）**：
   - §9 **S-24**：`docs/marketing/**` 约 2 MB PNG 在 Git 历史里；README 直接引用这些图，改动收益低，保持原样。
   - §6-3 覆盖率的**每目录阈值**：c8 只支持全局与逐文件阈值；全局下限已能拦住回归。
@@ -411,12 +417,14 @@
 
 `renderer.ts:1008-1015`：设置 `textContent = "已复制"`，随后 `window.setTimeout(..., 1_500)` **未保存句柄**。下一次 `render()`（`:221`）替换该节点 → 回调写到脱离文档的元素，用户**看不到**提示。修复：按按钮保存句柄并在重渲染时取消。
 
-### 4-10 【中】CSS 无 token 层、含约 24 行死规则 —— 死规则已删（见 §0.1 #48），token 层待做
+### 4-10 【中】CSS 无 token 层、含约 24 行死规则 —— 死规则已删（#48）、调色板护栏与首层 token 已建（#61），全面收敛待设计确认
 
 硬编码 hex：`settings.css` **127**、`workweb.css` 117、`excel.css` 103、`styles.css` 46、`quick.css` 18；`var(--…)` 使用数：`styles.css` 2、`workweb.css` 23、其余三个 **0**。`settings.css` 有 13 个近似灰色承担 4 种用途；5 个页面用了 3 套字体栈。
 **已核实无引用的死规则**：`styles.css:214` `.news-title`、`:864-867` `.news-title`、`:869-872` `.news-summary`、`:912` stealth `.news-summary`、`:1172-1178` `.driver-inference` + `:1180-1182` stealth 覆盖（新闻卡片已改用 `.driver-card`/`.driver-heading`/`.driver-meta`）、`settings.css:153-156` `.code-input`、`:235-239`/`:363` `.split-panel`。
 语义色漂移：涨/跌在 `styles.css` 为 `#ff6b6b`/`#4ecdc4`，`quick.css:43-44` 为 `#ad3b38`/`#287a52`，`workRenderer.ts:406` 又用 `positive`/`negative` 词汇，`excelRenderer` 用 Excel 绿 `#107c41`。且 `data-theme="stealth"` 只存在于 `styles.css`（`renderer.ts:945` 设置 `dataset.theme`），`quickRenderer` 从不设置 → **低调灰阶只影响悬浮窗**。
 - 修复：新增 `src/styles/tokens.css`（约 14 个 token）`@import` 进各页面（`build-renderer.mjs` 原样复制 CSS，故为纯增量）；删死规则；加 `stylelint`。
+  - **进度（2026-09-27，见 §0.1 #61）**：① 死规则已删（#48）；② **调色板护栏已完成**——新增 `src/presentation/cssPalette.ts`（纯解析器：hex/rgb/hsl 字面量计数、`var()` 定义/使用配对）与 `src/presentation/cssPalette.test.ts`：每个 CSS 文件的**去重颜色种类数是"只降不升"的预算**（`styles 75 / settings 86 / quick 15 / excel 71 / workweb 85`），新增近似色会让 `npm test` 直接失败；同时断言所有 `var(--x)` 都有定义（拼错就会静默失效）。③ **首层 token 已建**：`settings.css` 顶部 `:root` 定义 `--text`/`--text-muted`/`--text-faint`/`--surface`/`--surface-subtle`/`--line`/`--on-accent`，替换掉 30 处**取值完全一致**的高频字面量（`#4f555d`×5、`#777d85`×5、`#8a8f96`×6、`#d8dbe0`×5、`#f8f9fa`×4、`#fff`×5），因此**视觉零变化**。
+  - **需要设计确认后才能继续的部分**：把"13 个近似灰 → 4 种用途"真正合并、以及统一跨界面的涨跌语义色（`styles.css` `#ff6b6b`/`#4ecdc4` vs `quick.css` `#ad3b38`/`#287a52` vs Excel 绿 `#107c41`），还有 `data-theme="stealth"` 只作用于悬浮窗的问题。这些都会改变用户看到的颜色，属于设计决定，不做静默合并；护栏会保证在决定之前调色板不再继续膨胀。
 
 ---
 

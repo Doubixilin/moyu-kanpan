@@ -2,6 +2,17 @@
   color: #202327;
   background: #f3f4f6;
   font-family: Inter, "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+
+  /* 语义 token 层（审计报告 §4-10）。
+     这一步只收敛**取值完全一致**的高频色，因此零视觉变化；近似灰的合并
+     （13 个近似灰承担 4 种用途）属于设计收敛，需要人工确认后再做。 */
+  --text: #4f555d;
+  --text-muted: #777d85;
+  --text-faint: #8a8f96;
+  --surface: #fff;
+  --surface-subtle: #f8f9fa;
+  --line: #d8dbe0;
+  --on-accent: #fff;
 }
 
 * {
@@ -85,7 +96,7 @@ footer {
   padding: 18px;
   border: 1px solid #e1e3e6;
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 5px 18px rgb(30 35 40 / 0.045);
 }
 
@@ -94,7 +105,7 @@ footer {
 }
 
 .panel-heading > span {
-  color: #8a8f96;
+  color: var(--text-faint);
   font-size: 12px;
 }
 
@@ -122,10 +133,10 @@ input,
 select {
   min-width: 0;
   height: 34px;
-  border: 1px solid #d8dbe0;
+  border: 1px solid var(--line);
   border-radius: 7px;
   color: #282c31;
-  background: #fff;
+  background: var(--surface);
   outline: none;
 }
 
@@ -158,10 +169,10 @@ input[type="checkbox"] {
 .row-actions button,
 .add-row button {
   height: 32px;
-  border: 1px solid #d8dbe0;
+  border: 1px solid var(--line);
   border-radius: 6px;
   color: #444a52;
-  background: #f8f9fa;
+  background: var(--surface-subtle);
 }
 
 .row-actions button {
@@ -218,7 +229,7 @@ input[type="checkbox"] {
   align-items: center;
   gap: 10px;
   min-height: 42px;
-  color: #4f555d;
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -255,7 +266,7 @@ output {
   padding: 0 14px;
   border: 0;
   border-radius: 7px;
-  color: #fff;
+  color: var(--on-accent);
   background: #343940;
 }
 
@@ -316,7 +327,7 @@ output {
 
 .settings-tab-nav button.active {
   border-color: #383d44;
-  color: #fff;
+  color: var(--on-accent);
   background: #30343a;
 }
 
@@ -537,7 +548,7 @@ footer {
 }
 
 .tab-type {
-  color: #777d85;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -599,7 +610,7 @@ footer {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #4f555d;
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -645,16 +656,16 @@ footer {
 }
 
 .shortcut-label {
-  color: #4f555d;
+  color: var(--text);
   font-size: 13px;
 }
 
 .shortcut-row button {
   height: 34px;
-  border: 1px solid #d8dbe0;
+  border: 1px solid var(--line);
   border-radius: 7px;
   color: #444a52;
-  background: #f8f9fa;
+  background: var(--surface-subtle);
 }
 
 .shortcut-recorder {
@@ -664,7 +675,7 @@ footer {
 
 .shortcut-recorder.recording {
   border-color: #555c65;
-  color: #fff;
+  color: var(--on-accent);
   background: #555c65;
   box-shadow: 0 0 0 3px rgb(80 87 96 / 0.12);
 }
@@ -694,7 +705,7 @@ footer {
 .holding-setting-row label {
   display: grid;
   gap: 3px;
-  color: #777d85;
+  color: var(--text-muted);
   font-size: 10px;
 }
 
@@ -718,16 +729,16 @@ footer {
 }
 
 .security-label small {
-  color: #8a8f96;
+  color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
 
 .compact-button {
   width: 32px;
   height: 34px;
-  border: 1px solid #d8dbe0;
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #f8f9fa;
+  background: var(--surface-subtle);
 }
 
 .holding-rule-details {
@@ -784,7 +795,7 @@ footer {
 
 .holding-rule-empty {
   margin: 9px 0 0;
-  color: #8a8f96;
+  color: var(--text-faint);
 }
 
 .holding-alert-section {
@@ -819,7 +830,7 @@ footer {
 .risk-group-row > label:not(.visibility) {
   display: grid;
   gap: 3px;
-  color: #777d85;
+  color: var(--text-muted);
   font-size: 10px;
 }
 
@@ -833,7 +844,7 @@ footer {
   grid-column: 1 / -1;
   display: grid;
   gap: 3px;
-  color: #777d85;
+  color: var(--text-muted);
   font-size: 10px;
 }
 
@@ -845,13 +856,13 @@ footer {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  color: #4f555d;
+  color: var(--text);
   font-size: 12px;
 }
 
 .risk-section-heading span,
 .risk-advanced-details > p {
-  color: #8a8f96;
+  color: var(--text-faint);
   font-size: 10px;
 }
 
@@ -889,12 +900,12 @@ footer {
   align-items: baseline;
   gap: 10px;
   margin: 15px 0 8px;
-  color: #4f555d;
+  color: var(--text);
   font-size: 12px;
 }
 
 .risk-group-heading span {
-  color: #8a8f96;
+  color: var(--text-faint);
   font-size: 10px;
 }
 
@@ -914,10 +925,10 @@ footer {
   height: 32px;
   margin-top: 9px;
   padding: 0 12px;
-  border: 1px solid #d8dbe0;
+  border: 1px solid var(--line);
   border-radius: 6px;
   color: #444a52;
-  background: #f8f9fa;
+  background: var(--surface-subtle);
 }
 .add-holding-row {
   grid-template-columns: minmax(160px, 1.4fr) 90px 100px 88px;
@@ -940,7 +951,7 @@ footer {
   padding: 12px;
   border: 1px dashed #dedfe2;
   border-radius: 7px;
-  color: #8a8f96;
+  color: var(--text-faint);
   font-size: 12px;
   text-align: center;
 }
@@ -992,7 +1003,7 @@ footer {
 .ai-settings-grid > label {
   display: grid;
   gap: 4px;
-  color: #777d85;
+  color: var(--text-muted);
   font-size: 10px;
 }
 
