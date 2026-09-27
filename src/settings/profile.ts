@@ -128,6 +128,23 @@ const RISK_REQUIRED_NUMBER_RANGES = new Map<
 ]);
 const RISK_BOOLEAN_FIELDS = new Set(["oncePerDay", "onlyDuringTrading"]);
 
+/** 配置包体积上限（与渲染层 `PROFILE_MAX_BYTES` 一致）。 */
+export const PROFILE_MAX_TEXT_LENGTH = 2_000_000;
+
+/**
+ * `profile:preview` / `profile:apply` 的 IPC 参数校验。
+ *
+ * 从 `electron/main.ts` 抽出来（审计报告 §6-4），因此可以单测：
+ * 非对象载荷、超限文本、未知 mode 都必须有确定行为。
+ */
+export function parseProfileRequest(value: unknown): { text: string; mode: ProfileImportMode } {
+  if (!value || typeof value !== "object") throw new Error("无效的配置包请求");
+  const request = value as Record<string, unknown>;
+  const text = typeof request.text === "string" ? request.text : "";
+  if (text.length > PROFILE_MAX_TEXT_LENGTH) throw new Error("配置包不能超过 2MB");
+  return { text, mode: request.mode === "replace" ? "replace" : "merge" };
+}
+
 export function previewProfileImport(
   current: UserSettings,
   text: string,

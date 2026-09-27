@@ -30,7 +30,6 @@ import {
   activeSecurityCodes,
   preserveRuntimeSecrets,
   toUserSettings,
-  type AiSettings,
   type AppConfig,
   type UserSettings,
   type WindowSettings
@@ -39,12 +38,19 @@ import { analyzeNewsWithRules } from "../src/domain/analysis.js";
 import { benchmarkCodeForSecurity, buildDecisionCue } from "../src/domain/decision.js";
 import { buildSanitizedEventContext } from "../src/domain/handoff.js";
 import {
-  DEFAULT_MARKET_INDICES,
   emptyMarketOverview,
-  instrumentKey
+  resolveMarketInstrument as resolveMarketInstrumentInput
 } from "../src/domain/market.js";
 import { aggregateNewsSource } from "../src/domain/news.js";
-import type { AlertEvent } from "../src/domain/types.js";
+import { mostSevereAlert as pickMostSevereAlert } from "../src/domain/alertSeverity.js";
+import { normalizeAiTestRequest as normalizeAiTestRequestInput } from "../src/domain/aiTestRequest.js";
+import { parseLocalPreviewPort } from "../src/config.js";
+import { errorMessage, upsertError } from "../src/domain/errors.js";
+import {
+  presentNews as presentNewsSelection,
+  selectRelevantNews as selectRelevantNewsByContext
+} from "../src/domain/newsSelection.js";
+import { parseProfileRequest as parseProfileRequestInput } from "../src/settings/profile.js";
 import { buildTrayPresentation, type TrayVisualState } from "../src/domain/trayStatus.js";
 import {
   buildAlertCandidates,
@@ -56,7 +62,6 @@ import { quickWindowBounds } from "../src/domain/quickWindowBounds.js";
 import {
   isExternalLinkAllowed,
   isInsecureStorageBackend,
-  isSecureApiBaseUrl,
   isTrustedRendererUrl,
   resolveDevServerUrl
 } from "../src/domain/runtimeSecurity.js";
@@ -1025,41 +1030,10 @@ async function persistAlertState(nowMs = Date.now()): Promise<void> {
   }
 }
 
-/**
- * 托盘提示要选"最该看的那条"。
- * 同一批事件的 `triggeredAt` 完全相同，`events.at(-1)` 取到的只是候选生成顺序里的最后一个，
- * 并不是最严重的，因此按规则类型排一个优先级。
- */
-const ALERT_SEVERITY: Record<AlertEvent["type"], number> = {
-  stop_loss: 100,
-  price_below: 90,
-  fall_percent: 85,
-  total_loss: 80,
-  daily_loss: 75,
-  portfolio_daily_loss: 70,
-  group_loss: 65,
-  near_stop: 60,
-  exposure: 55,
-  position_value: 50,
-  holding_count: 45,
-  price_above: 40,
-  rise_percent: 35,
-  watch_price: 30,
-  daily_profit: 20,
-  total_profit: 15,
-  portfolio_daily_profit: 10,
-  group_profit: 5
-};
-
 function mostSevereAlert(
   events: AppSnapshot["risk"]["recentEvents"]
 ): AppSnapshot["risk"]["recentEvents"][number] | undefined {
-  let best: (typeof events)[number] | undefined;
-  for (const event of events) {
-    // 只在严格更大时替换，因此并列时保留先生成的那条。
-    if (!best || ALERT_SEVERITY[event.type] > ALERT_SEVERITY[best.type]) best = event;
-  }
-  return best;
+  return pickMostSevereAlert(events);
 }
 
 function deliverAlertEvents(events: AppSnapshot["risk"]["recentEvents"]): void {
@@ -1167,11 +1141,7 @@ async function refreshNews(): Promise<void> {
 }
 
 function presentNews(items: AppSnapshot["news"], limit: number): AppSnapshot["news"] {
-  return (
-    config.news.mode === "important"
-      ? items.filter((item) => item.analysis?.useful === true && item.analysis.priority !== "low")
-      : items
-  ).slice(0, limit);
+  return presentNewsSelection(items, limit, config.news.mode);
 }
 
 async function analyzePendingNews(
@@ -1219,35 +1189,14 @@ function newsSourceStates() {
 }
 
 function selectRelevantNews<T extends NewsItem>(items: T[]): T[] {
-  const activeCodes = new Set(activeSecurityCodes(config));
-  const securities = config.securities.filter((security) => activeCodes.has(security.code));
-  const quoteNames = new Map(
-    latestQuotes
-      .filter((quote) => activeCodes.has(quote.code) && quote.name)
-      .map((quote) => [quote.code, quote.name])
-  );
-  const annotated = items.map((item): T => {
-    const text = `${item.title} ${item.summary ?? ""}`;
-    const relatedCodes = new Set((item.relatedCodes ?? []).filter((code) => activeCodes.has(code)));
-    for (const security of securities) {
-      const keywords = [
-        security.code,
-        security.name,
-        security.alias,
-        quoteNames.get(security.code) ?? ""
-      ].filter((keyword) => keyword.length >= 2);
-      if (keywords.some((keyword) => text.includes(keyword))) {
-        relatedCodes.add(security.code);
-      }
-    }
-    return {
-      ...item,
-      relatedCodes: [...relatedCodes]
-    } as T;
+  return selectRelevantNewsByContext(items, {
+    securities: config.securities,
+    activeCodes: activeSecurityCodes(config),
+    quoteNames: new Map(
+      latestQuotes.filter((quote) => quote.name).map((quote) => [quote.code, quote.name])
+    ),
+    mode: config.news.mode
   });
-
-  if (config.news.mode !== "watchlist_related") return annotated;
-  return annotated.filter((item) => (item.relatedCodes?.length ?? 0) > 0);
 }
 function aiAnalysisNamespace(): string {
   if (!config.ai.enabled || !config.ai.apiKey) return "rules-v2";
@@ -1420,33 +1369,7 @@ async function testConfiguredAi(value: unknown): Promise<AiRuntimeStatus> {
 }
 
 function normalizeAiTestRequest(value: unknown): AppConfig["ai"] {
-  if (!value || typeof value !== "object") throw new Error("AI 测试参数无效");
-  const request = value as { ai?: Partial<AiSettings>; apiKey?: unknown };
-  const incoming = request.ai;
-  if (!incoming || (incoming.provider !== "deepseek" && incoming.provider !== "custom")) {
-    throw new Error("AI 服务类型无效");
-  }
-  const baseUrl = typeof incoming.baseUrl === "string" ? incoming.baseUrl.trim() : "";
-  const model = typeof incoming.model === "string" ? incoming.model.trim() : "";
-  const timeoutSeconds = Number(incoming.timeoutSeconds);
-  try {
-    if (!isSecureApiBaseUrl(baseUrl)) throw new Error();
-  } catch {
-    throw new Error("AI API 地址无效");
-  }
-  if (!model || model.length > 100) throw new Error("AI 模型名称无效");
-  if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 5 || timeoutSeconds > 120) {
-    throw new Error("AI 请求超时必须为 5–120 秒");
-  }
-  const transientKey = typeof request.apiKey === "string" ? request.apiKey.trim() : "";
-  return {
-    enabled: incoming.enabled !== false,
-    provider: incoming.provider,
-    baseUrl: baseUrl.replace(/\/$/, ""),
-    model,
-    timeoutSeconds: Math.round(timeoutSeconds),
-    apiKey: transientKey || config.ai.apiKey
-  };
+  return normalizeAiTestRequestInput(value, config.ai.apiKey);
 }
 
 function snapshot(): AppSnapshot {
@@ -1613,11 +1536,7 @@ function registerIpc(): void {
 }
 
 function parseProfileRequest(value: unknown): { text: string; mode: ProfileImportMode } {
-  if (!value || typeof value !== "object") throw new Error("无效的配置包请求");
-  const request = value as Record<string, unknown>;
-  const text = typeof request.text === "string" ? request.text : "";
-  if (text.length > 2_000_000) throw new Error("配置包不能超过 2MB");
-  return { text, mode: request.mode === "replace" ? "replace" : "merge" };
+  return parseProfileRequestInput(value);
 }
 
 function sanitizedContextForEvent(value: unknown): string {
@@ -1698,33 +1617,7 @@ function sanitizedContextForEvent(value: unknown): string {
 }
 
 function resolveMarketInstrument(value: unknown): MarketInstrument {
-  if (!value || typeof value !== "object") throw new Error("无效的行情标的");
-  const request = value as Record<string, unknown>;
-  const kind = request.kind === "index" ? "index" : request.kind === "stock" ? "stock" : null;
-  const code = typeof request.code === "string" ? request.code.trim() : "";
-  const market =
-    request.market === "SH" || request.market === "SZ" || request.market === "BJ"
-      ? request.market
-      : null;
-  if (!kind || !market || !/^\d{6}$/.test(code)) throw new Error("无效的行情标的");
-
-  if (kind === "index") {
-    const matched = DEFAULT_MARKET_INDICES.find(
-      (item) => item.code === code && item.market === market
-    );
-    if (!matched) throw new Error("不支持的市场指数");
-    return matched;
-  }
-
-  const security = config.securities.find((item) => item.code === code && item.market === market);
-  if (!security) throw new Error("股票不在当前配置中");
-  return {
-    key: instrumentKey("stock", market, code),
-    kind: "stock",
-    code,
-    market,
-    name: security.alias || security.name || code
-  };
+  return resolveMarketInstrumentInput(value, config.securities);
 }
 async function setActiveTab(tabId: string): Promise<UserSettings> {
   const tab = config.tabs.find((item) => item.id === tabId && item.visible);
@@ -1898,11 +1791,6 @@ async function resetMainWindowBounds(): Promise<void> {
   mainWindow.show();
   mainWindow.moveTop();
 }
-function upsertError(errors: string[], next: string): string[] {
-  const prefix = next.split(":")[0];
-  return [next, ...errors.filter((error) => !error.startsWith(`${prefix}:`))].slice(0, 4);
-}
-
 /**
  * 触发一次后台刷新。
  *
@@ -1918,15 +1806,6 @@ function triggerRefresh(scope: string, task: (() => Promise<void>) | null | unde
 
 function reportInternalFailure(scope: string, error: unknown): void {
   latestErrors = upsertError(latestErrors, `internal:${scope} 刷新异常：${errorMessage(error)}`);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function parsePreviewPort(value: string | undefined): number {
-  const port = Number(value);
-  return Number.isInteger(port) && port >= 1024 && port <= 65_535 ? port : 0;
 }
 
 if (hasSingleInstanceLock)
@@ -2028,7 +1907,7 @@ if (hasSingleInstanceLock)
       }
     });
     await localWorkWeb.start(
-      !app.isPackaged ? parsePreviewPort(process.env.MOYU_WEB_PREVIEW_PORT) : 0
+      !app.isPackaged ? parseLocalPreviewPort(process.env.MOYU_WEB_PREVIEW_PORT) : 0
     );
 
     registerIpc();

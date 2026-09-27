@@ -1,3 +1,4 @@
+import type { Security } from "../config.js";
 import type { DailyCandle, MarketInstrument, MarketOverview, MarketSeries } from "./types.js";
 
 export const DEFAULT_MARKET_INDICES: MarketInstrument[] = [
@@ -16,6 +17,43 @@ export function instrumentKey(
 
 export function eastmoneySecid(instrument: MarketInstrument): string {
   return `${instrument.market === "SH" ? "1" : "0"}.${instrument.code}`;
+}
+
+/**
+ * `market:detail` 的 IPC 参数校验：把渲染器传来的不可信对象收窄成行情标的。
+ *
+ * 指数只允许默认指数表里的项，股票必须在当前配置里——否则渲染器可以借这个通道
+ * 请求任意代码。此前写在 `electron/main.ts` 并直接读模块级 `config`
+ * （审计报告 §6-4），现在显式传入证券列表，因此可单测。
+ */
+export function resolveMarketInstrument(value: unknown, securities: Security[]): MarketInstrument {
+  if (!value || typeof value !== "object") throw new Error("无效的行情标的");
+  const request = value as Record<string, unknown>;
+  const kind = request.kind === "index" ? "index" : request.kind === "stock" ? "stock" : null;
+  const code = typeof request.code === "string" ? request.code.trim() : "";
+  const market =
+    request.market === "SH" || request.market === "SZ" || request.market === "BJ"
+      ? request.market
+      : null;
+  if (!kind || !market || !/^\d{6}$/.test(code)) throw new Error("无效的行情标的");
+
+  if (kind === "index") {
+    const matched = DEFAULT_MARKET_INDICES.find(
+      (item) => item.code === code && item.market === market
+    );
+    if (!matched) throw new Error("不支持的市场指数");
+    return matched;
+  }
+
+  const security = securities.find((item) => item.code === code && item.market === market);
+  if (!security) throw new Error("股票不在当前配置中");
+  return {
+    key: instrumentKey("stock", market, code),
+    kind: "stock",
+    code,
+    market,
+    name: security.alias || security.name || code
+  };
 }
 
 export function tencentSymbol(instrument: MarketInstrument): string {

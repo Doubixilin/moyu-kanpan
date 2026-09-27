@@ -3,7 +3,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import type { UserSettings } from "../../config";
-import { exportProfile, previewProfileImport, profilePrompt } from "../profile";
+import {
+  exportProfile,
+  parseProfileRequest,
+  previewProfileImport,
+  PROFILE_MAX_TEXT_LENGTH,
+  profilePrompt
+} from "../profile";
 
 function current(): UserSettings {
   return {
@@ -333,5 +339,26 @@ describe("portable profile packages", () => {
       preview.nextSettings?.watchlist.map((item) => item.order),
       [0, 1]
     );
+  });
+
+  it("validates the IPC profile request payload", () => {
+    assert.deepEqual(parseProfileRequest({ text: "{}", mode: "replace" }), {
+      text: "{}",
+      mode: "replace"
+    });
+    // 未知 mode 回落到 merge；非字符串 text 视为空串（随后会在预览阶段报错）
+    assert.deepEqual(parseProfileRequest({ text: "{}", mode: "overwrite" }), {
+      text: "{}",
+      mode: "merge"
+    });
+    assert.deepEqual(parseProfileRequest({ text: 42 }), { text: "", mode: "merge" });
+    assert.deepEqual(parseProfileRequest({}), { text: "", mode: "merge" });
+
+    assert.throws(() => parseProfileRequest(null), /无效的配置包请求/);
+    assert.throws(() => parseProfileRequest("text"), /无效的配置包请求/);
+    // 体积上限：`>` 而不是 `>=`，正好 2MB 仍然接受
+    const max = "x".repeat(PROFILE_MAX_TEXT_LENGTH);
+    assert.equal(parseProfileRequest({ text: max }).text.length, PROFILE_MAX_TEXT_LENGTH);
+    assert.throws(() => parseProfileRequest({ text: max + "x" }), /配置包不能超过 2MB/);
   });
 });

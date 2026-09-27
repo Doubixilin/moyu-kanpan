@@ -24,6 +24,7 @@ describe("settings renderer build contract", () => {
       "src/settings/controllers/ai.ts",
       "src/settings/controllers/bossKey.ts",
       "src/settings/controllers/profile.ts",
+      "src/domain/errors.ts",
       "src/presentation/format.ts"
     ]) {
       assert.ok(builder.includes(emitted), `${emitted} 未加入 build-renderer 的编译清单`);

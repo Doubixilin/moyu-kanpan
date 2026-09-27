@@ -17,7 +17,10 @@ export interface SettingsShellPorts {
   clearMessage(): void;
 }
 
-/** 把任意异常转成可以直接展示给用户的一句话。 */
-export function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+/**
+ * 异常 → 可展示文案。
+ *
+ * 实现在 `domain/errors.ts`（`main.ts` 也用它），这里保留旧名以免改动所有调用点，
+ * 同时消掉审计报告 §4-7 记的"同名同语义多份实现"。
+ */
+export { errorMessage as describeError } from "../../domain/errors.js";

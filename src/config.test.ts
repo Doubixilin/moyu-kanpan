@@ -10,6 +10,7 @@ import {
   MAX_TABS,
   MAX_TAB_SECURITY_CODES,
   MIN_HOLDING_COST_PRICE,
+  parseLocalPreviewPort,
   preserveRuntimeSecrets,
   toUserSettings
 } from "./config";
@@ -517,5 +518,15 @@ describe("config", () => {
     });
 
     assert.equal(config.tabs.find((tab) => tab.id === "my-watch")?.type, "watchlist");
+  });
+
+  it("parses the local preview port strictly", () => {
+    assert.equal(parseLocalPreviewPort("8380"), 8380);
+    assert.equal(parseLocalPreviewPort("1024"), 1024);
+    assert.equal(parseLocalPreviewPort("65535"), 65535);
+    // 特权端口、越界、非整数与垃圾输入一律回落为 0（随机端口）
+    for (const value of [undefined, "", "1023", "65536", "0", "-1", "80.5", "abc", "8080abc"]) {
+      assert.equal(parseLocalPreviewPort(value), 0, String(value));
+    }
   });
 });

@@ -500,6 +500,16 @@ export function inferSecurityMarket(code: string): SecurityMarket {
 }
 
 /**
+ * 解析 `MOYU_WEB_PREVIEW_PORT`：只接受 1024–65535 的整数，其余一律 0（随机端口）。
+ *
+ * 从 `electron/main.ts` 抽出来（审计报告 §6-4），因此可以直接单测。
+ */
+export function parseLocalPreviewPort(value: string | undefined): number {
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1024 && port <= 65_535 ? port : 0;
+}
+
+/**
  * 校验"待保存的设置"是否满足落盘不变量。
  *
  * 注意：这里**不是**完整的 UserSettings 类型守卫，只检查会导致数据损坏或不可用的字段
