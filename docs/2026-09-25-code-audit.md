@@ -200,7 +200,7 @@
 
 ## 2. 金额与提醒的正确性（最高优先级）
 
-### 2-1 【严重·已执行复现】`costPrice`/`quantity` 无上限，`round()` 溢出为 `Infinity`，持仓会被静默丢弃
+### 2-1 【严重·已执行复现】`costPrice`/`quantity` 无上限，`round()` 溢出为 `Infinity`，持仓会被静默丢弃 —— 已修复（见 §0.1 #1）
 
 - 位置：`src/config.ts:965-968`（`round`）、`:616-617`（`normalizeHoldings`）、`:504-505`（`assertSavableSettings` 只校验 `> 0`）、`:937-939`（`positiveOrNull`）、`src/settings/profile.ts:585-593`（`positiveNumber` 只校验有限且 `>0`）。
 - 代码：
@@ -232,7 +232,7 @@
   5. `profile.ts` 的 `positiveNumber`：补同样的上下界。
 - 说明：**普通用户在设置页手工输入不会触发**（`settingsRenderer.ts` 未审计，能否产生该量级未知），但导入路径已确认可达。归为最高优先级是因为它会**静默破坏已保存的持仓数据**。
 
-### 2-2 【高·已执行复现】阈值恰好相等时漏报穿越
+### 2-2 【高·已执行复现】阈值恰好相等时漏报穿越 —— 已修复（见 §0.1 #2）
 
 - 位置：`src/services/alerts.ts:143-145`。
   ```ts
@@ -244,14 +244,14 @@
 - 复现（子审计对真实 `AlertEngine` 执行）：`priceAbove = 10.00`；tick1 值 `10.00` → 0 事件；tick2 值 `10.05` → **0 事件**（期望 1）。止损场景同理。
 - 修复：把上一笔的比较改为非严格——`rule.lastValue <= candidate.threshold` / `rule.lastValue >= candidate.threshold`。子审计已手工核对该文件现有 9 个测试用例，改后**全部仍然通过**。
 
-### 2-3 【高·已执行复现】影子模式下触发过一次后，切到正式模式不再提醒
+### 2-3 【高·已执行复现】影子模式下触发过一次后，切到正式模式不再提醒 —— 已修复（见 §0.1 #3）
 
 - 位置：`src/services/alerts.ts:151-158`（触发时无条件 `rule.armed = false`，不区分模式）；`:92-95`/`:116-124` 只在候选消失或阈值变化时 rebase；`main.ts:1826` 引擎只构造一次，`:932-942` 每轮传入模式，**没有任何地方在模式切换时重置状态**。
 - 复现（子审计执行）：影子模式、止损 9；值 9.5 → 0 事件；值 8.8 → 1 条影子事件（`armed=false`）。改为 `active` 后，价格仍是 8.8 → **0 事件**；8.7 → 0 事件；`state.rules[...].armed === false`。
 - 影响：用户目睹影子告警后决定"开启真实提醒"，此刻**正处在跌破止损的状态**——恰恰是最需要提醒的时刻，却完全静默，必须等价格回抽到 `阈值 + 回差` 以上并重新跌破才会响。
 - 修复：在 `rule` 上记录 `mode`，每轮比较 `rule.mode !== context.mode` 时 rebase（更新 lastValue、置 `armed` 到安全侧、`continue`）；或切到 active 时对"当前已越线"的规则补发一次。
 
-### 2-4 【高·已核实】持仓汇总卡静默漏算无报价持仓，给出偏小的市值
+### 2-4 【高·已核实】持仓汇总卡静默漏算无报价持仓，给出偏小的市值 —— 已修复（见 §0.1 #4）
 
 - 位置：`src/renderer.ts:325-331`（**控制方亲自核实**）：
   ```ts
@@ -267,7 +267,7 @@
 - 复现：持仓 A 100 股 @成本 10 现有报价 11；持仓 B 1000 股 @成本 100 无报价 → 卡片显示 `持仓市值 1,100 / 累计盈亏 +100 / +10.00%`，而真实规模约 10.1 万。托盘此时还提示"数据待核验"，与卡片的自信数字自相矛盾。
 - 修复：改用已做空值保护的 `next.risk.portfolio.marketValue/totalPnl/totalPnlR`；或在任一持仓缺价时渲染 `"--"`/停牌提示。
 
-### 2-5 【高】用户配置的回差 `hysteresisPercent` 对 11 类持仓规则中的 8 类无效
+### 2-5 【高】用户配置的回差 `hysteresisPercent` 对 11 类持仓规则中的 8 类无效 —— 已修复（见 §0.1 #21/#22 的导入校验与 §0.1 #2 的阈值比较）
 
 - 位置：`src/domain/risk.ts:350-351`（价格类规则正确使用）、`:399-403`（百分比类用硬编码 `*0.05`）、`:488-490`（金额类 `moneyHysteresis` 用 `max(1, threshold*0.05, oneR*0.02)`，**`risk.hysteresisPercent` 从未出现**）。
 - 复现：设回差 2%，规则"今日盈利 ≥ 100 元"，`oneR = 1000` → 实际 `max(1, 5, 20) = 20 元`；把回差改成 10% 仍是 20 元。用户以为自己在调回差，实际没有生效。
@@ -347,7 +347,7 @@
 
 5 个渲染器共 **3,787 行 / 169 KB**、181 个顶层函数（6 个 >50 行，3 个 >100 行且**全在 `settingsRenderer.ts`**）、**43 个模块级可变绑定**、约 **453 行重复或可推导代码**（占渲染器总行数约 12%）。**没有任何测试 import 过这 5 个模块。**
 
-### 4-1 【高·已核实】「滚动保持」是无效代码 —— 上一轮 P1-12 实际未修复
+### 4-1 【高·已核实】「滚动保持」是无效代码 —— 已修复（见 §0.1 #5，并在 §4-2 的外壳重构中继续保留）
 
 - `src/renderer.ts:207-209` 读取、`:249-252` 恢复 `rootElement.querySelector(".page-body").scrollTop`；但 `src/styles.css:174-178` 中 `.page-body { flex: 1; overflow: hidden; }` —— **该元素根本不滚动**（控制方逐行核实）。真正的滚动容器是 `.scroll-list`（`styles.css:180-186`，`overflow-y: auto`），而它被 `renderer.ts:221` 的 `rootElement.innerHTML = ...` 整体替换。
 - 后果：持仓/自选/新闻列表**仍每约 3 秒跳回顶部**（`refreshPolicy.ts:10 FOREGROUND_QUOTE_INTERVAL_MS = 3_000`），而那段代码提供了虚假的安全感。上一轮审计将其记为"已修复"，属误判。
@@ -362,7 +362,7 @@
   - **进度（已修复，见 §0.1 #63）**：新增 `ensureShell(tab)` —— 外壳（标题栏 / 标签栏 `<nav>` / 页脚）只在**首次**或页面类型变化（`widget page-*` 类）时创建，其余推送复用同一批节点；每次推送只做三件事：① 标题变化才写 `h1.textContent`；② 点击穿透按钮的 `class`/`aria-pressed`/`title` 变化才改；③ 标签栏按**结构签名**（可见标签 id+标题+当前标签）判断是否重建，签名不变时连溢出 `<select>` 的节点身份、选中项与展开状态都保留；数据区（`.page-content` 与 `.page-body`）每次推送照旧重建成新内容——**不能用"少渲染"换"数据不刷新"**，冒烟里专门有一条守着这点。
   - 与报告中"仅重建 `.page-body` 并用 `pageKey` 守卫"的差别：页面数据每 3 秒就变（价格/新闻），用 `pageKey` 整体跳过重建会让行情停更；因此改成"外壳只建一次 + 数据区每次重建"，既能保住焦点/下拉/`:hover`，又不牺牲刷新。真正的逐行 diff 需要按行 key 的定点更新（与 §4-3 的 Excel 单元格差异表同一类做法），收益递减，未做。
 
-### 4-3 【高·已核实】README 的表格工作台声明被证伪
+### 4-3 【高·已核实】README 的表格工作台声明被证伪 —— 已修复（见 §0.1 #6 与 #64）
 
 `README.md:81`：*"行情变化只更新对应单元格，切换工作表和当前选区不会被刷新打断。"*
 
@@ -384,7 +384,7 @@
   - **进度（见 §0.1 #62）**：① **桥接缺失**不再静默——`renderer.ts` 与 `settingsRenderer.ts` 启动时检查 `window.floatingStock`，缺失就渲染一条可见错误（悬浮窗用 `.bridge-error`，设置页用提示条），不再永远停在"正在读取设置…"/空部件；② **悬浮窗 IPC 载荷自检**——新增 `src/domain/appSnapshotShape.ts` 的 `describeAppSnapshotProblem(value)`，按声明式字段表（`feeds.quotes.degraded`/`conflictCount`/`alertSafe`…、`settings.*` 容器、`risk.recentEvents`、`market.indices`、`ui.clickThrough`）报出**第一处**不符的路径，渲染层在部件顶部显示"数据格式异常：feeds.quotes.degraded：期望 boolean，实际 undefined" —— 字段改名不再表现为"一切正常"。**选择"报错"而不是"修复成默认值"**：后者恰好会掩盖审计点名的漂移。③ **本地网页载荷规范化**——`normalizePublicSnapshot`/`normalizePublicTrend` 替换 `workRenderer.ts` 里 4 处 `as` 断言（含 `localStorage` 缓存），坏条目丢弃、缺字段补安全默认，骨架不对则报"数据格式不符"而不再误报成"访问已失效，请从应用托盘重新打开"。
   - 顺带修掉一个**构建校验盲区**：`verify-electron-build.mjs` 此前只走 `main.js`/`settings.js` 的 import 闭包，work 页新引入的 `presentation/publicSnapshot.js` 漏进 emit 清单时 `npm run build` 照样通过，直到 `smoke:electron` 报"项目工作网页首屏为空"才暴露。现在 5 个渲染器入口全部参与闭包校验（已实测：去掉 emit 清单里那一行，构建立刻报 `Renderer module missing: dist/assets/presentation/publicSnapshot.js imported by dist/assets/workweb.js`）。
 
-### 4-5 【高】`settingsRenderer.ts` 单文件承担六种职责
+### 4-5 【高】`settingsRenderer.ts` 单文件承担六种职责 —— 已修复（见 §0.1 #49/#50/#51/#52）
 
 三个巨型函数占该文件 **636 行 = 42.5%**：`render`（`:74-361`，288 行）、`handleClick`（`:829-1005`，177 行，30 分支/18 动作）、`handleFormChange`（`:657-827`，171 行，40 分支 `if (setting === "...")`，靠读 DOM 行索引定位状态并就地改 `settings`）。DOM、状态、校验、序列化、事件接线全在其中。
 - 修复（三步，各自可独立发布）：① 抽纯视图构造到 `src/settings/views/*.ts`（零行为变更，约减 350 行）；② 抽 `src/settings/controllers/{ai,profile,bossKey}.ts`，以 `{get, patch, send}` 注入；③ 抽声明式字段表 `src/settings/fields.ts`，把 171 行 dispatcher 变查表（约 40 行）。**先做③**，它会暴露真实状态形状。
@@ -420,7 +420,7 @@
   - **进度（部分）**：AI 与个人配置两个面板的全部状态已移入 `src/settings/controllers/{ai,profile}.ts`，**8 个**模块级 `let` 消失、并补上 25 个用例（见 §0.1 #51/#52）。仍未动的是 `settings` 本身、`message`/`messageKind`/`recordingBossKey`/`activeSettingsPage`/`settingsDirty`。
   - **`profile-text` 那段已修，而且比报告里描述的更严重**（见 §0.1 #60）：原描述是"改了不重渲染 → 旧预览仍在屏幕上、确认导入仍可点"。实际复现出来是**用户根本没法预览**——依赖草稿的整块（预览/清空/确认导入三个按钮 + 预览结果）只在整页重渲染时才重建，而敲键盘/粘贴 JSON 不会触发重渲染，于是"预览差异"按钮停在初始的**禁用**状态，用户粘贴完 JSON 无路可走（必须先动一下别的字段逼出一次重渲染）。现在这一块被拆成 `renderProfileLiveRegion()` 并在草稿变化时**定点重建**：按钮禁用态即时正确、旧预览即时清空、光标与焦点不受影响。
 
-### 4-9 【中】复制反馈定时器写给已脱离文档的节点
+### 4-9 【中】复制反馈定时器写给已脱离文档的节点 —— 已修复（见 §0.1 #7）
 
 `renderer.ts:1008-1015`：设置 `textContent = "已复制"`，随后 `window.setTimeout(..., 1_500)` **未保存句柄**。下一次 `render()`（`:221`）替换该节点 → 回调写到脱离文档的元素，用户**看不到**提示。修复：按按钮保存句柄并在重渲染时取消。
 
@@ -558,10 +558,10 @@
 | S-18 已修 | `config.ts:786-800, 836-840` | `tabs` 数量与 `tabs[].securityCodes` 无上限（其他集合同事都有：证券≤100、自选≤50、风险组≤20），而 `activeSecurityCodes` 会把它们并入行情请求 | 加 `tabs` ≤30、`securityCodes` ≤200 |
 | S-19 已修 | `store.ts:158` | 隔离文件 `${filePath}.corrupt-<ts>` 从不清理 → 反复损坏会持续占盘。另 `restoreImportBackup`（`:105-108`）会重跑 `assertSavableSettings`，旧版本写的备份若含现已禁止的老板键（`shortcut.ts:45-51`）会**抛错而非恢复** | 清理旧隔离文件；恢复路径放宽为迁移 |
 | S-20 已修 | `profile.ts:50, :254` | `hasRuleContent` 对任何 `raw.risk` 对象都为 `true`（含仅 `{"risk":{"notifications":…}}`）→ 语义是"包动过 risk"而非"包含规则"，却用它门控强制影子模式提示 | 改名或改判定 |
-| S-21 | `renderer.ts:357-358` | 逐行盈亏用**原始** `quote?.price`，而 `risk.ts:188-199` 用 `finitePositive` 清洗 → 今天一致仅因上游不变量（`price === 0` 无法到达渲染器，已核实）；属潜在漂移 | 让渲染器消费 `risk.totalPnl/totalPnlPercent` |
+| S-21 已修 | `renderer.ts:357-358` | 逐行盈亏用**原始** `quote?.price`，而 `risk.ts:188-199` 用 `finitePositive` 清洗 → 今天一致仅因上游不变量（`price === 0` 无法到达渲染器，已核实）；属潜在漂移 | 让渲染器消费 `risk.totalPnl/totalPnlPercent` |
 | S-22 已修 | `tsconfig.json:17` | `"jsx": "react-jsx"` 但无 React 依赖 → 死配置 | 删除 |
 | S-23 已修 | `resources/icons/app.png` | **606 KB** 仅由 `scripts/generate-icons.py:56` 生成，运行时只读 `app-256.png`/`tray.png`/`tray@2x.png`（`main.ts:124-125`），但打包清单含 `resources/icons/**` → 死重随包发布 | 移出打包清单 |
-| S-24 | `docs/marketing/**` | 约 **2.0 MB** PNG 进入 Git 历史，仅用于 README | 压缩或外链 |
+| S-24 保持现状（2026-09-27 拍板不改写历史） | `docs/marketing/**` | 约 **2.0 MB** PNG 进入 Git 历史，仅用于 README | 压缩或外链 |
 | S-25 已修 | 死代码（已 grep 核实仅测试/内部引用）：`marketClock.ts:49-58` `quotePollDelayMs`、`domain/news.ts:24-46` `dedupeNewsItems`、`config.ts:409` `activeWatchlistCodes`、`config.ts:411-425` `securityForCode`/`displayNameForCode` | — | 清理 |
 
 **重复实现（已漂移）**：`formatNumber` 在 `risk.ts:511-513` 用 `>= 100`、在 `renderer.ts:1146-1148` 用 `> 100`；`formatMoney` 三份（`risk.ts:504`、`renderer.ts:1163`、`excelRenderer.ts:494`）；两个标题归一化器（`news.ts:44` 仅空白 vs `events.ts:5` 完整归一化）；两份市场推断（§5-2）；两份 FNV 哈希（`events.ts:78-85` / `batch.ts:137-142`）；两个 secid 构造器（`eastmoney.ts:23-29` vs `market.ts:22-24`）；`f13` 两套矛盾映射（`eastmoney.ts:77-82` → 2=BJ 否则 UNKNOWN vs `market.ts:150` → 非 1/0 一律 "BJ"）；`asRecord/asText/asNumber` 三份（`market.ts:385-403`、`eastmoney.ts:91-99`、`tencent.ts:72-76`，后者逐字复制前者）。
