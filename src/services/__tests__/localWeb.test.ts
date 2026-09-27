@@ -114,4 +114,43 @@ describe("local work web server", () => {
       413
     );
   });
+
+  it("never issues a session for an empty token", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "moyu-web-"));
+    await mkdir(path.join(root, "assets"));
+    await writeFile(path.join(root, "work.html"), "<html>work</html>");
+    await writeFile(path.join(root, "assets/workweb.js"), "");
+    await writeFile(path.join(root, "assets/workweb.css"), "");
+    const server = new LocalWorkWebServer({
+      assetRoot: root,
+      snapshot: () =>
+        ({
+          updatedAt: "now",
+          quotes: [],
+          indices: [],
+          events: [],
+          feeds: {}
+        }) as unknown as PublicSnapshot,
+      // 空串/纯空白必须被当作"没提供"：否则 timingSafeEqual 会把两个空 buffer 判为相等
+      token: "   "
+    });
+    await server.start();
+    cleanup.push(async () => {
+      await server.close();
+      await rm(root, { recursive: true, force: true });
+    });
+
+    const generated = decodeURIComponent(new URL(server.url).hash.slice(1));
+    assert.ok(generated.length >= 16, "空 token 必须回退为随机 token");
+
+    const session = await fetch(`${server.origin}/api/session`, {
+      method: "POST",
+      headers: { Origin: server.origin, "X-Local-Token": "" }
+    });
+    assert.equal(session.status, 403);
+    const emptyCookie = await fetch(`${server.origin}/api/public-snapshot`, {
+      headers: { Origin: server.origin, Cookie: "moyu_local=" }
+    });
+    assert.equal(emptyCookie.status, 401);
+  });
 });

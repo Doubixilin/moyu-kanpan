@@ -127,12 +127,15 @@
 | 50 | §4-5 第二步：视图构造函数全部外移 | 扩写 `src/settings/views.ts`（362 行）为纯构造函数集合：`nullableNumber`/`option`/`displayNameForCode`（别名→名称→代码的唯一实现，此前渲染层有 9 处副本）/`settingsPageClass`/`renderSettingsNavigation`/`holdingRuleSummary`/`holdingAlertInput`/`formatRuleAmount`/`holdingRuleDescriptions`/`renderWatchItem`/`renderRiskGroupSetting`/`renderAddHolding`/`renderTabSetting`/`renderHoldingSetting`/`renderProfilePreview`/`renderProfilePanel`。**一律显式传参**，不再像原先那样读模块级 `settings` 全局（那几个函数因此根本无法单测）；转义统一走 `presentation/format.ts`。`settingsRenderer.ts` **1398 → 1204 行**（净减 194 行；被移出的 171 行 dispatcher 与散落的视图字符串换成了 `fields.ts` 340 行 + `views.ts` 362 行的显式表/构造函数——行数不是收益，可测试性才是） | `src/settings/__tests__/views.test.ts` 从 7 个用例扩到 **14 个**（新增：导航只高亮当前分类且 `aria-selected` 唯一、别名→名称→代码回退、内置页 `readonly`+「内置」标记且无删除按钮 vs 自定义页有 `delete-tab`、中间行方向键不禁用、规则「未配置 / 已启用 · N 条 / 已暂停 · N 条」与"清空规则"按钮禁用态、`holdingRuleSummary` 计数、导入预览的 `valid/invalid` 与错误/提醒分级、导入面板按钮禁用矩阵与 JSON 转义）。`views.ts` 语句/行覆盖 **100%**；`rendererBuild.test.ts` 增加契约断言：`build-renderer.mjs` 的编译清单必须包含 `settings/views.ts`、`settings/fields.ts`、`presentation/format.ts`（漏加会让 `npm run build` 的 import 闭包校验失败） |
 | 51 | §4-5 第三步：控制器外移（AI / 个人配置 / 老板键） | 新增 `src/settings/controllers/`：`ports.ts`（端口约定 + `describeError`）、`bossKey.ts`（纯函数：`code`→accelerator 的 40 项映射、`acceleratorFromKeyboardEvent`、`displayBossKey`、把一次按键判成"取消/仅修饰键/不支持/接受"的 `bossKeyCaptureOutcome`）、`ai.ts`（`AiSettingsController`：草稿 Key、连接状态、忙碌标记 + `test`/`clearCredential`/`syncAfterSave`）、`profile.ts`（`ProfileImportController`：草稿文本/导入方式/预览/忙碌/备份标记 + 读文件、复制提示词、复制配置包、预览、导入、恢复 6 条流程）。控制器只通过 `{ipc(), render, notify, clearMessage, confirm, applySettings}` 端口与宿主交互：**不读 DOM、不读模块级变量、不碰 `window`** | `src/settings/__tests__/controllers.test.ts`（**25 个用例**）覆盖：修饰键顺序与危险组合（`Alt+F4`/`F11`/无修饰的普通字母）、录制结果四种分支、徽标文案与 Key 占位提示的全部状态、草稿 Key 截断与 trim、测试连接/清除凭据/保存后落盘的调用与提示顺序、preload 缺失与"忙碌中"重入、预览三态文案、改动即作废旧预览、超限文件不读进内存、`replace` 与恢复备份的确认门槛、导入失败保留草稿、无 bridge 时的全流程空操作 |
 | 52 | §4-8 设置页模块级可变绑定（部分） | `settingsRenderer.ts` **1204 → 979 行**；`aiStatus`/`pendingAiApiKey`/`aiBusy`/`profileText`/`profileMode`/`profilePreview`/`profileBusy`/`hasProfileBackup` **8 个**模块级 `let` 消失（§4-8 记录的"13 个同级可变全局"减少 8 个），同时删掉了本地重复的 `SettingsPage` 类型（改用 `views.ts` 的导出） | 同 #51；`npm run verify` + `build-renderer.mjs` 的 import 闭包校验通过（4 个控制器模块已加入编译清单） |
+| 53 | §8 安全复核残余（5 Low + 3 Info） | ① `localWeb.ts` 把空串/纯空白 token 视为"未提供"（并让 `matchesToken` 直接拒绝空值）——此前 `timingSafeEqual` 对两个 0 长度 buffer 返回 **true**，空 token 即可建会话；② `isTrustedRendererUrl` 的 `file:` 分支同时比较 **host**（此前只比 pathname）；③ 新增 `isExternalLinkAllowed`：`link:open` 只放行**无 userinfo 的 https**（grep 确认全部新闻/公告来源都是 https）；④ cookie 会话校验统一走常数时间比较（此前 header 用 `timingSafeEqual`、cookie 用 `===`）；⑤ **打包态不再读取任何 `.env`**；⑥ `verify-packaged-app.mjs` 增加负向断言（`.env`/`personal.local.json`/`settings.json`/`ai-credential.json` 不得出现在 ASAR 里）；⑦ dev server 白名单补齐 `quick.html`/`excel.html`/`work.html`（此前这三个窗口的 IPC 会被全部拒绝），并显式拒绝白名单外路径；⑧ 新增 `setPermissionRequestHandler`/`setPermissionCheckHandler` 一律拒绝、`settings:save` 加 2MB 载荷上限（`src/domain/settingsPayload.ts`）、`app:online` 补偿刷新加 60 秒防抖、Linux `safeStorage` 回落到 `basic_text` 时写入可见错误提示 | `runtimeSecurity.test.ts` 增加 3 组断言（file host、dev 白名单含 3 个页面且拒绝其它路径、https-only 链接、Linux basic_text 判定）；新增 `settingsPayload.test.ts`（3 个用例，含 ±1 字符的边界）；`localWeb.test.ts` 增加"空 token 不建会话 + 空 cookie 401"的回归用例 |
+| 55 | `smoke:data` 失败时不可读（工程化小项） | `scripts/smoke-data.mjs` 的顶层 `await` 直接把上游异常抛成 unhandled rejection：Node 24 在退出清理阶段会触发 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`，把真正的错误正文冲掉——"上游挂了"和"代码坏了"在日志里长得一样。现在收口到 `main().catch()`：打印一行 `[smoke:data] 失败：<message>`，识别到 `fetch failed`/`timed out`/`UND_ERR_SOCKET` 时追加"这是上游/网络问题"的提示，并保持退出码 1 | 真实故障验证：本轮 `push2.eastmoney.com` 从本机不可达（`Invoke-WebRequest` 三个域名结果：pulse 端点 `ResponseEnded`、`finance.eastmoney.com` 200），修复前是 libuv 断言崩溃，修复后是上面那三行诊断 + `exit=1` |
+| 54 | §7-2 依赖审计结论与实测不一致 | `docs/2026-07-11-final-pre-macos-release-audit.md` 把一行"生产依赖及完整依赖树均为 0"拆成两行事实：`--omit=dev` **0 条**；完整树 **8 条**（7 high / 1 moderate：`electron`、`extract-zip`、`tar`、`undici`、`@xmldom/xmldom`、`fast-uri`、`js-yaml`、`brace-expansion`，全部只在 Electron 下载/解包与打包工具链里执行）；并写明本机镜像源会让 `npm audit` 报 `NOT_IMPLEMENTED`——那种情况下"审计通过"与"审计根本没跑起来"看起来完全一样，必须显式加 `--registry=https://registry.npmjs.org` | 在本机实跑两条命令复核：`--omit=dev` → `found 0 vulnerabilities`；完整树 → `{"high":7,"moderate":1,"total":8}` |
 
 **这一步的额外收获**：分支覆盖率 73.65% → 74.08% → 74.82% → **75.66%**，总测试 190 → 203 → 217 → **242**。`handleFormChange` 原本是设置界面唯一承载全部逻辑的函数且完全没被测试；现在它的逻辑被完整覆盖，剩下的薄壳只做 DOM 定位。同理，视图构造函数外移前也没有任何测试（它们读模块级全局），现在 `views.ts` 的语句/行覆盖到 **100%**；控制器外移前同样零测试，现在 `src/settings/controllers/**` 语句覆盖 **97.96%**（整体行覆盖率 **91.87%**）。三层拆完后，那个文件里只剩下 DOM 定位、整页模板与事件接线。
 
 **行为保真点（改动前后逐条对照过，需人工抽查）**：测试连接前先清空旧提示；"不支持的按键"**保持录制状态**让用户直接换键重试（只有 Esc 才退出录制）；超过 2MB 的配置包不读进内存；`replace` 导入与恢复备份必须先确认；导入失败保留草稿文本；`test-ai` 用当前草稿 Key 覆盖已保存配置但**只测不写**；保存成功后才把草稿 Key 写入系统安全存储（写失败仍走 `save()` 的统一错误提示）。唯一已知差异：预览/导入/恢复流程中 `notify` 会立即渲染一次（旧实现是攒到 `finally` 只渲染一次），最终画面一致，只多一次整页重渲染——这正是 §4-6 记的"整页重渲染"，属于既有问题。
 
-**验证旁注**：本轮 `smoke:data` 首两次运行因上游 2.5s 超时失败、第三次通过（`Request timed out after 2500ms`，同一时段 `smoke:news`/`smoke:profile` 正常）。该脚本每次请求的预算本来就紧，属于已知易抖动项，不是本次改动引入的回归。
+**验证旁注（本轮 §8 批次）**：`npm run verify` 全绿（**248** 个测试、typecheck、lint、format、构建与 import 闭包校验）；`smoke:news`、`smoke:profile` 通过；`smoke:data` **因上游不可达而失败**——本轮 `push2.eastmoney.com` 从本机持续返回 "response ended prematurely"（同一时段 `finance.eastmoney.com` 200、腾讯源正常），而该 smoke 刻意直连东财、不走回退。失败路径（`src/providers/eastmoney.ts`、`src/services/quotes.ts`）在本批 diff 中**未被修改**（`git diff --name-only` 可复核），且新增的失败诊断（#55）把这类上游故障与代码回归区分开来。上一批控制器提交时的同类抖动（2.5s 超时）同样为上游问题。
 
 **行为变更提示（需人工确认）**：`assertSavableSettings` 现在会**拒绝**超出量级或非整数的持仓数量/成本。设置界面本身已把输入钳制在合法范围（`Math.max(1, Math.round(...))`、`Math.max(0.0001, ...)`），因此正常操作不受影响；手工编辑 `settings.json` 或导入异常配置包会得到明确报错，而不是静默改写数据。
 
@@ -454,10 +457,12 @@
 无 `.github/`。159 个测试、类型检查、构建与打包校验全靠手动执行。修复：最小 workflow（无需外网）`npm ci` → `tsc -p tsconfig.json` → `npm test` → `npm run build`；真实接口 smoke 单列为 allow-failure 或定时任务。
 - **实际落地**：`.github/workflows/ci.yml` 执行 Node 24 + `npm ci` → `typecheck` → `lint` → `test` → `build`；真实接口 smoke 不进 CI（结果随行情波动），发布前手动跑。
 
-### 6-3 【中】覆盖率数字不可复现
+### 6-3 【中】覆盖率数字不可复现 —— 已修复（见 §0.1 #44）
 `docs/2026-07-11-final-pre-macos-release-audit.md:25, :134` 引用"行 91.23% / 分支 72.77% / 函数 87.70%"，但仓库无 `c8`/`nyc`、无 `coverage` 脚本。修复：引入 `c8` + `test:coverage`，核心模块设阈值。
 
-### 6-4 【中】约 5,500 行无直接测试
+### 6-4 【中】约 5,500 行无直接测试 —— 部分修复（见 §0.1 #43–#53）
+
+进度：设置界面已抽出 `fields.ts`/`views.ts`/`controllers/**`（共 52 个新用例，`settingsRenderer.ts` 从 1398 行降到 979 行）；`runtimeSecurity.ts`/`settingsPayload.ts` 的纯逻辑也补了直接测试。**仍未覆盖**：`electron/main.ts`（约 1900 行，需继续抽纯逻辑）、5 个渲染器的运行时行为、`exchangeAnnouncements.ts`/`cninfo.ts`/`csrc.ts`/`shortcut.ts`。
 无同名测试的源文件：`electron/main.ts` 1845、`src/settingsRenderer.ts` 1496、`src/renderer.ts` 1224、`src/excelRenderer.ts` 561、`src/workRenderer.ts` 414、`src/providers/exchangeAnnouncements.ts` 143、`cninfo.ts` 98、`shortcut.ts` 95、`csrc.ts` 49。
 **没有任何测试 import 过 5 个渲染器模块**；`src/rendererBuild.test.ts` 是源码文本冒烟测试（3 个用例全在 `readFile` + `assert.match`，例如断言构建脚本里出现字面量 `compileTypeScript("src/excelRenderer.ts", "excel.js")`），不 import、不执行，无法发现运行时回归，且对 §8-3 的漏检照样通过。真正被充分测试的是 `src/presentation/*`（含一条"不泄漏持仓成本"的隐私断言）。
 **子审计列出的具体测试缺口**：`singleFlight` 的 reject 路径、`fetchWithTimeout` 非 ok 路径、腾讯 `volume`/`amount` 偏移、localWeb 向死客户端广播/心跳、`MarketDataCoordinator` 同键并发去重、`newsEvents` 的 limit-vs-filter 交互。
@@ -472,14 +477,14 @@
 - 影响：Electron 随 Chromium 收安全补丁，落入 EOL 后**渲染引擎不再获得 CVE 修复**，当前已脱管约 4.5 个月。本项目渲染进程要处理多个第三方来源与用户自配端点的不可信文本并写入 DOM；CSP 与转义已做得很好，但把"最后一层防线"停在没有补丁的引擎上，对展示持仓与凭证的应用是最高优先级的**维护**风险（不是现存漏洞）。
 - 修复：升级到 44.x（至少 43.x）。升级后回归：透明窗口、无边框、点击穿透、置顶、托盘、全局老板键、`safeStorage` 往返、`node:sqlite` 可用性（内置 Node 22.20 → 24.x）。
 
-### 7-2 【中】完整依赖树告警与文档结论不一致
-`docs/2026-07-11-final-pre-macos-release-audit.md:27` 声称"生产依赖及完整依赖树均为 0 个已知漏洞"。实测完整树 8 条（`electron`(经 `extract-zip`)、`extract-zip`、`tar`、`undici`、`@xmldom/xmldom`、`fast-uri`、`js-yaml`、`brace-expansion`），`--omit=dev` 复核为 **0**，全部位于 electron 下载/解包工具链、仅影响开发机安装阶段。修复：文档改为可复现命令与范围，完整树检查降级为信息项。
+### 7-2 【中】完整依赖树告警与文档结论不一致 —— 已修复（见 §0.1 #54）
+`docs/2026-07-11-final-pre-macos-release-audit.md:27` 声称"生产依赖及完整依赖树均为 0 个已知漏洞"。实测完整树 8 条（`electron`(经 `extract-zip`)、`extract-zip`、`tar`、`undici`、`@xmldom/xmldom`、`fast-uri`、`js-yaml`、`brace-expansion`），`--omit=dev` 复核为 **0**，全部位于 electron 下载/解包工具链、仅影响开发机安装阶段。修复：文档改为可复现命令与范围，完整树检查降级为信息项（见 §0.1 #54）。
 
 ---
 
 ## 8. 安全复核结论（无 High/Medium 漏洞）
 
-独立安全审计 + 控制方复核：**没有 Critical / High / Medium 漏洞**；README 关于凭证的核心声明**经核实成立**。残余 5 Low + 3 Info：
+独立安全审计 + 控制方复核：**没有 Critical / High / Medium 漏洞**；README 关于凭证的核心声明**经核实成立**。残余 5 Low + 3 Info —— **本轮 8 条全部处理完毕（见 §0.1 #53）**：
 
 | # | 级别 | 位置 | 问题 | 实用性 |
 | --- | --- | --- | --- | --- |

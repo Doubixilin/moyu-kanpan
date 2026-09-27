@@ -35,7 +35,10 @@ export class LocalWorkWebServer {
   private readonly trendInFlight = new Map<string, Promise<PublicTrend | null>>();
 
   constructor(private readonly options: LocalWorkWebOptions) {
-    this.token = options.token ?? randomBytes(24).toString("base64url");
+    // 空串/纯空白必须等同于"没提供 token"：否则 `matchesToken("")` 会因为两个 0 长度
+    // buffer 而返回 true（`timingSafeEqual` 对空 buffer 返回 true），空 token 即可建会话。
+    const provided = options.token?.trim();
+    this.token = provided ? provided : randomBytes(24).toString("base64url");
   }
 
   get origin(): string {
@@ -227,13 +230,21 @@ export class LocalWorkWebServer {
 
   private matchesToken(value: string | string[] | undefined): boolean {
     if (typeof value !== "string") return false;
+    // 空值必须直接拒绝：两个空 buffer 会被 timingSafeEqual 判为相等。
+    if (!value || !this.token) return false;
     const left = Buffer.from(value);
     const right = Buffer.from(this.token);
     return left.length === right.length && timingSafeEqual(left, right);
   }
 
   private hasSession(cookie: string | undefined): boolean {
-    return cookie?.split(";").some((entry) => entry.trim() === `moyu_local=${this.token}`) ?? false;
+    if (!cookie) return false;
+    // 与 header 路径一致地走常数时间比较（此前这里用 `===`，两条路径强度不同）。
+    return cookie.split(";").some((entry) => {
+      const trimmed = entry.trim();
+      if (!trimmed.startsWith("moyu_local=")) return false;
+      return this.matchesToken(trimmed.slice("moyu_local=".length));
+    });
   }
 
   private notifyVisibility(): void {

@@ -23,6 +23,7 @@ const { stdout } = await execFileAsync(process.execPath, [asarBin, "list", asarP
   encoding: "utf8",
   windowsHide: true
 });
+const listing = stdout.replaceAll("\\", "/");
 for (const required of [
   "dist/index.html",
   "dist/settings.html",
@@ -33,7 +34,14 @@ for (const required of [
   "resources/icons/tray.png",
   "LICENSE"
 ]) {
-  if (!stdout.replaceAll("\\", "/").includes(required)) {
+  if (!listing.includes(required)) {
     throw new Error("Packaged ASAR is missing " + required);
   }
+}
+
+// 负向断言：文档（docs/2026-07-11-final-pre-macos-release-audit.md:31/128）声称
+// 打包产物不含个人配置与 `.env`。此前只检查"必需文件存在"，这条声明从未被验证过。
+for (const forbidden of [".env", "personal.local.json", "settings.json", "ai-credential.json"]) {
+  const hit = listing.split("\n").find((line) => line.trim().split("/").at(-1) === forbidden);
+  if (hit) throw new Error("Packaged ASAR must not contain " + forbidden + " (" + hit.trim() + ")");
 }

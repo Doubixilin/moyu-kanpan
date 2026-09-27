@@ -10,6 +10,7 @@ import {
   powerMonitor,
   safeStorage,
   screen,
+  session,
   shell,
   Tray,
   type IpcMainInvokeEvent
@@ -53,10 +54,13 @@ import {
 import { ensureVisibleWindowBounds } from "../src/domain/windowBounds.js";
 import { quickWindowBounds } from "../src/domain/quickWindowBounds.js";
 import {
+  isExternalLinkAllowed,
+  isInsecureStorageBackend,
   isSecureApiBaseUrl,
   isTrustedRendererUrl,
   resolveDevServerUrl
 } from "../src/domain/runtimeSecurity.js";
+import { isOversizedSettingsPayload } from "../src/domain/settingsPayload.js";
 import {
   getAShareMarketState,
   isAShareTradingSession,
@@ -662,10 +666,14 @@ function applyWindowPreferences(): void {
   }
 }
 function loadEnvironmentFiles(): void {
+  // 打包态**不读任何 `.env`**：exe 目录、userData 与 cwd 都在同用户可写范围内，
+  // 能被用来把已保存的密钥指向攻击者的端点（审计报告 §8 Low-5）。
+  // 打包后请用设置界面配置（安全存储），或由系统环境变量提供 AI_*。
+  if (app.isPackaged) return;
   const candidates = [
     path.join(app.getPath("userData"), ".env"),
     path.join(path.dirname(app.getPath("exe")), ".env"),
-    ...(!app.isPackaged ? [path.join(process.cwd(), ".env")] : [])
+    path.join(process.cwd(), ".env")
   ];
   const seen = new Set<string>();
 
@@ -679,6 +687,15 @@ function loadEnvironmentFiles(): void {
         process.env[key] = parsed[key];
       }
     }
+  }
+}
+
+/** `safeStorage` 实际选中的后端；非 Linux 或 API 不可用时返回 undefined。 */
+function selectedStorageBackend(): string | undefined {
+  try {
+    return safeStorage.getSelectedStorageBackend();
+  } catch {
+    return undefined;
   }
 }
 
@@ -799,7 +816,16 @@ async function runMarketRefresh(): Promise<void> {
   }
 }
 
+/** 网络恢复/系统唤醒后的补偿刷新：60 秒内只认真执行一次（审计报告 §8 Info-8）。 */
+const CONNECTIVITY_REFRESH_COOLDOWN_MS = 60_000;
+let lastConnectivityRefreshAt = 0;
+
 function refreshAfterConnectivityChange(): void {
+  const now = Date.now();
+  // 失败重连、反复休眠/唤醒、多个窗口同时 online 时都会走到这里；
+  // 去掉防抖会打成"突发外网请求"，而 60 秒内的行情/新闻本来就是同一批数据。
+  if (now - lastConnectivityRefreshAt < CONNECTIVITY_REFRESH_COOLDOWN_MS) return;
+  lastConnectivityRefreshAt = now;
   runQuoteRefresh();
   runFastIndexRefresh();
   triggerRefresh("market", refreshMarketNow);
@@ -1512,7 +1538,11 @@ function registerIpc(): void {
       maxSourceAgeMs: Math.max(config.pollIntervals.quotesMs * 10, 180_000)
     });
   });
-  handleTrusted("settings:save", async (_event, value: unknown) => saveSettings(value));
+  handleTrusted("settings:save", async (_event, value: unknown) => {
+    // 渲染器已被 sender 校验过，但载荷体积仍要有上限（配置导入包有 2 MB 上限）。
+    if (isOversizedSettingsPayload(value)) throw new Error("设置数据过大，已拒绝保存");
+    return saveSettings(value);
+  });
   handleTrusted("navigation:setActiveTab", async (_event, tabId: unknown) =>
     typeof tabId === "string" ? setActiveTab(tabId) : settingsForRenderer(config)
   );
@@ -1542,7 +1572,8 @@ function registerIpc(): void {
   });
   handleTrusted("appearance:toggleTheme", () => toggleTheme());
   handleTrusted("link:open", async (_event, url: unknown) => {
-    if (typeof url === "string" && /^https?:\/\//.test(url)) await shell.openExternal(url);
+    // 只放行无 userinfo 的 https：明文 http 会把用户送到可被篡改的页面上。
+    if (isExternalLinkAllowed(url)) await shell.openExternal(url as string);
   });
   handleTrusted("news:copyContext", (_event, eventId: unknown) => {
     const text = sanitizedContextForEvent(eventId);
@@ -1901,6 +1932,12 @@ function parsePreviewPort(value: string | undefined): number {
 if (hasSingleInstanceLock)
   void app.whenReady().then(async () => {
     if (process.platform === "win32") app.setAppUserModelId("dev.polaris.floatingStockWidget");
+    // 应用不需要任何 Web 权限（摄像头/麦克风/定位/通知/剪贴板读取等）：一律拒绝。
+    // 不设这两个 handler 时 Electron 的默认行为取决于页面与 Chromium 版本（审计报告 §8 Info-8）。
+    session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
+      callback(false)
+    );
+    session.defaultSession.setPermissionCheckHandler(() => false);
     loadEnvironmentFiles();
     devServerUrl = resolveDevServerUrl(app.isPackaged, process.env.VITE_DEV_SERVER_URL);
     const defaults = readDefaultConfig();
@@ -1914,6 +1951,12 @@ if (hasSingleInstanceLock)
     const settingsRecoveryMessage = settingsStore.consumeRecoveryMessage();
     if (settingsRecoveryMessage)
       latestErrors = upsertError(latestErrors, `settings:${settingsRecoveryMessage}`);
+    if (isInsecureStorageBackend(process.platform, selectedStorageBackend())) {
+      latestErrors = upsertError(
+        latestErrors,
+        "secure-storage:系统安全存储回落到 basic_text（等价明文），建议改用环境变量提供 API Key"
+      );
+    }
     aiCredentialStore = new EncryptedApiKeyStore(
       path.join(app.getPath("userData"), "ai-credential.json"),
       {

@@ -24,7 +24,8 @@
 | 单元/服务测试 | 135 项通过 |
 | 测试覆盖率 | 行 91.23%，分支 72.77%，函数 87.70% |
 | TypeScript 与 Electron 构建 | 通过 |
-| npm 官方漏洞审计 | 生产依赖及完整依赖树均为 0 个已知漏洞 |
+| npm 漏洞审计（生产依赖） | `npm audit --omit=dev --registry=https://registry.npmjs.org` → **0 个已知漏洞** |
+| npm 漏洞审计（完整依赖树） | `npm audit --registry=https://registry.npmjs.org` → **8 条**（7 high / 1 moderate：`electron`、`extract-zip`、`tar`、`undici`、`@xmldom/xmldom`、`fast-uri`、`js-yaml`、`brace-expansion`）。全部位于 Electron 下载/解包与打包工具链，只在开发机 `npm install`/打包阶段执行，**不进入运行时**。属已知信息项，不阻断发布 |
 | 真实行情 smoke | 东财、腾讯双源一致；覆盖率 100%；市场概览、分时、日 K、BOLL 正常 |
 | 真实新闻 smoke | 东财、巨潮、沪深交易所、证监会均成功；52 份文档聚合为 41 个事件，其中 6 个合并事件 |
 | Windows unpacked/NSIS 打包 | Electron 39.8.10 x64 构建成功，安装包与 ASAR 新鲜度/清单校验通过 |
@@ -34,6 +35,8 @@
 | 外部运行时 | 不需要用户安装 Node、Python、数据库或 VC++ 原生模块；SQLite 来自 Electron 内置 Node |
 
 验证限制：本轮没有在 macOS 上实际运行透明窗口、Dock/托盘、通知、快捷键、签名或打包；Windows NSIS 安装/卸载也没有作为日常测试入口。
+
+审计命令注意：本机 `npm config get registry` 指向镜像源（npmmirror）时，`npm audit` 会因镜像未实现 `/-/npm/v1/security/*` 而报 `NOT_IMPLEMENTED`；请显式加 `--registry=https://registry.npmjs.org`，否则"审计通过"与"审计没跑起来"看起来完全一样（见 `docs/2026-09-25-code-audit.md` §7-2）。
 
 ## 3. 发布阻断项（P0）
 
