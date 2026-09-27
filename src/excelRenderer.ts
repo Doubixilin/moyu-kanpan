@@ -188,6 +188,11 @@ let sheets: ExcelSheetData[] = [
 ];
 const customSheetState = loadCustomSheet();
 let latestSnapshot: AppSnapshot | null = null;
+/** 趋势面板的稳定节点与签名（见 `renderTrendPanel`）：工具栏只建一次。 */
+let trendSelect: HTMLSelectElement | null = null;
+let trendRangeLabel: HTMLElement | null = null;
+let trendBody: HTMLElement | null = null;
+let trendOptionSignature = "";
 let selectedTrendCode = "";
 let trendRequestGeneration = 0;
 const trendCache = new Map<string, MarketDetail>();
@@ -639,24 +644,48 @@ async function loadTrendChart(force = false): Promise<void> {
   }
 }
 
+/**
+ * 趋势面板：工具栏（含项目 `<select>`）只建一次，每次推送只更新消息与图表。
+ *
+ * 原实现每次都 `trendPanel.innerHTML = …`，把 `<select>` 一起重建——用户展开下拉时
+ * 下一次轮询就把选择打断了（审计报告 §4-3 表格里"趋势分析页"那一行）。
+ */
 function renderTrendPanel(detail?: MarketDetail, message = ""): void {
   const options = trendOptions();
-  const optionHtml = options
-    .map(
-      (item) =>
-        `<option value="${escapeHtml(item.code)}" ${item.code === selectedTrendCode ? "selected" : ""}>${escapeHtml(item.name)}　${escapeHtml(item.code)}</option>`
-    )
-    .join("");
+  const optionSignature = options.map((item) => `${item.code}:${item.name}`).join("|");
   const model = detail ? buildExcelBollChart(detail.daily.items) : null;
-  trendPanel.innerHTML = `
-    <div class="trend-toolbar">
-      <div><strong>项目趋势分析</strong><span>最近 ${model?.count ?? 60} 个交易日</span></div>
-      <label>项目 <select id="trend-security">${optionHtml}</select></label>
-      <button data-command="trend-refresh">刷新数据</button>
-    </div>
-    ${message ? `<div class="trend-message">${escapeHtml(message)}</div>` : ""}
-    ${model ? renderTrendSvg(model) : ""}
-  `;
+
+  if (!trendSelect?.isConnected) {
+    trendPanel.innerHTML = `
+      <div class="trend-toolbar">
+        <div><strong>项目趋势分析</strong><span></span></div>
+        <label>项目 <select id="trend-security"></select></label>
+        <button data-command="trend-refresh">刷新数据</button>
+      </div>
+      <div class="trend-body"></div>
+    `;
+    trendSelect = required<HTMLSelectElement>("#trend-security");
+    trendRangeLabel = trendPanel.querySelector<HTMLElement>(".trend-toolbar span");
+    trendBody = required(".trend-body");
+    trendOptionSignature = "";
+  }
+
+  if (!trendSelect || !trendBody) return;
+  if (optionSignature !== trendOptionSignature) {
+    trendSelect.innerHTML = options
+      .map(
+        (item) =>
+          `<option value="${escapeHtml(item.code)}">${escapeHtml(item.name)}　${escapeHtml(item.code)}</option>`
+      )
+      .join("");
+    trendOptionSignature = optionSignature;
+  }
+  // 保持选中项：项目列表没变时不重建 select，因此这里只需要同步值。
+  if (selectedTrendCode && trendSelect.value !== selectedTrendCode) {
+    trendSelect.value = selectedTrendCode;
+  }
+  if (trendRangeLabel) trendRangeLabel.textContent = `最近 ${model?.count ?? 60} 个交易日`;
+  trendBody.innerHTML = `${message ? `<div class="trend-message">${escapeHtml(message)}</div>` : ""}${model ? renderTrendSvg(model) : ""}`;
 }
 
 function renderTrendSvg(model: NonNullable<ReturnType<typeof buildExcelBollChart>>): string {

@@ -702,6 +702,51 @@ async function main() {
         }
         return `${children} 个子元素${pageErrors.length ? `（控制台 ${pageErrors.length} 条 error，多为 file:// 下缺少 IPC）` : ""}`;
       });
+
+      // 表格工作台还需要拿到快照才能建工作表；趋势页的"项目下拉"在每次推送时
+      // 必须保持同一个节点（§4-3 表格里那一行"趋势分析页"）。
+      if (page.file !== "excel.html") continue;
+      window.webContents.send("snapshot:update", makeSnapshot(12.34));
+      await delay(200);
+      const trendProbe = await evaluate(`
+        (() => {
+          const tab = document.querySelector('button[data-sheet-index]');
+          const tabs = [...document.querySelectorAll('button[data-sheet-index]')];
+          const trendTab = tabs.find((button) => button.textContent.includes('趋势'));
+          if (!trendTab) return { missing: 'trend-tab' };
+          trendTab.click();
+          const select = document.querySelector('#trend-security');
+          if (!select) return { missing: 'trend-select' };
+          window.__trendSelect = select;
+          select.focus();
+          return { focused: document.activeElement === select, options: select.options.length };
+        })()
+      `);
+      check("月度工作台：趋势页项目下拉可获得焦点（§4-3 前置）", () => {
+        if (trendProbe.missing) throw new Error("缺少元素：" + trendProbe.missing);
+        if (!trendProbe.focused) throw new Error("趋势页下拉无法获得焦点");
+        if (trendProbe.options <= 0) throw new Error("趋势页下拉没有选项");
+        return `${trendProbe.options} 个项目可选`;
+      });
+
+      window.webContents.send("snapshot:update", makeSnapshot(56.78));
+      await delay(200);
+      const trendAfter = await evaluate(`
+        (() => {
+          const probe = window.__trendSelect;
+          return {
+            sameSelect: document.contains(probe),
+            focused: document.activeElement === probe,
+            options: probe.options.length
+          };
+        })()
+      `);
+      check("月度工作台：推送刷新后趋势页下拉不被重建（§4-3）", () => {
+        if (!trendAfter.sameSelect) throw new Error("趋势页下拉被重建（展开时会被打断）");
+        if (!trendAfter.focused) throw new Error("趋势页下拉失去焦点");
+        if (trendAfter.options <= 0) throw new Error("重建后选项丢失");
+        return "下拉节点/焦点/选项均保留";
+      });
     }
   } catch (error) {
     // 设置页加载或交互脚本自身抛错：单独记一条，避免被误读成"某个断言失败"。
